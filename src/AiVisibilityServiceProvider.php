@@ -6,6 +6,7 @@ use Illuminate\Console\Scheduling\Schedule;
 use Illuminate\Queue\Events\JobProcessing;
 use Illuminate\Support\Facades\Event;
 use Livewire\Livewire;
+use IsrarMinhas\FilamentAiVisibility\Commands\DiscoverCommand;
 use IsrarMinhas\FilamentAiVisibility\Commands\EnginesCommand;
 use IsrarMinhas\FilamentAiVisibility\Commands\HealthCommand;
 use IsrarMinhas\FilamentAiVisibility\Commands\InstallCommand;
@@ -21,6 +22,9 @@ use IsrarMinhas\FilamentAiVisibility\Engines\EngineRegistry;
 use IsrarMinhas\FilamentAiVisibility\Engines\KeyResolver;
 use IsrarMinhas\FilamentAiVisibility\Events\EnginePaused;
 use IsrarMinhas\FilamentAiVisibility\Events\EngineResumed;
+use IsrarMinhas\FilamentAiVisibility\Events\RunCompleted;
+use IsrarMinhas\FilamentAiVisibility\Jobs\DiscoverCompetitorsJob;
+use IsrarMinhas\FilamentAiVisibility\Support\Tenancy;
 use IsrarMinhas\FilamentAiVisibility\Jobs\QueueHeartbeat;
 use IsrarMinhas\FilamentAiVisibility\Listeners\SendEngineAlerts;
 use IsrarMinhas\FilamentAiVisibility\Models\Heartbeat;
@@ -30,6 +34,8 @@ use IsrarMinhas\FilamentAiVisibility\Runs\RunPlanner;
 use IsrarMinhas\FilamentAiVisibility\Runs\RunProgress;
 use IsrarMinhas\FilamentAiVisibility\Support\Alerts\AlertNotifier;
 use IsrarMinhas\FilamentAiVisibility\Support\Health\SystemHealth;
+use IsrarMinhas\FilamentAiVisibility\Support\HelperAi;
+use IsrarMinhas\FilamentAiVisibility\Support\Instructions;
 use IsrarMinhas\FilamentAiVisibility\Support\Importer;
 use IsrarMinhas\FilamentAiVisibility\Support\Limits;
 use IsrarMinhas\FilamentAiVisibility\Support\Pricing;
@@ -52,6 +58,7 @@ class AiVisibilityServiceProvider extends PackageServiceProvider
             ->hasMigrations([
                 'create_ai_visibility_tables',
                 'create_ai_visibility_tracking_tables',
+                'create_ai_visibility_competitor_tables',
             ])
             ->hasCommands([
                 InstallCommand::class,
@@ -59,6 +66,7 @@ class AiVisibilityServiceProvider extends PackageServiceProvider
                 EnginesCommand::class,
                 RunCommand::class,
                 ProbeCommand::class,
+                DiscoverCommand::class,
             ]);
     }
 
@@ -87,6 +95,8 @@ class AiVisibilityServiceProvider extends PackageServiceProvider
         $this->app->singleton(RunProgress::class);
         $this->app->singleton(BudgetGuard::class);
         $this->app->singleton(Metrics::class);
+        $this->app->singleton(Instructions::class);
+        $this->app->singleton(HelperAi::class);
     }
 
     public function packageBooted(): void
@@ -109,6 +119,13 @@ class AiVisibilityServiceProvider extends PackageServiceProvider
         // Long-running workers must see settings changed in the panel (kill switch, budgets…).
         Event::listen(JobProcessing::class, fn () => app(Settings::class)->flush());
 
+        // After each run, look for competitors in the new answers.
+        Event::listen(RunCompleted::class, function (RunCompleted $event) {
+            if ($event->run->results_done > 0 && Tenancy::as($event->run->tenant_id, fn () => app(Settings::class)->get('discovery.enabled', true))) {
+                DiscoverCompetitorsJob::dispatch($event->run->brand_id, $event->run->tenant_id, $event->run->getKey());
+            }
+        });
+
         Event::listen(EnginePaused::class, [SendEngineAlerts::class, 'handlePaused']);
         Event::listen(EngineResumed::class, [SendEngineAlerts::class, 'handleResumed']);
 
@@ -127,6 +144,11 @@ class AiVisibilityServiceProvider extends PackageServiceProvider
                 ->everyFifteenMinutes()
                 ->withoutOverlapping()
                 ->name('ai-visibility:run');
+
+            // Re-score and re-classify competitors daily (stale classifications are refreshed).
+            $schedule->command('ai-visibility:discover --queue')
+                ->dailyAt('04:30')
+                ->name('ai-visibility:discover');
 
             $schedule->command('ai-visibility:probe')
                 ->everyFiveMinutes()

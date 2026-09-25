@@ -2,7 +2,7 @@
 
 Track how your brand shows up in answers from ChatGPT, Claude, Gemini, Perplexity and Grok — with competitor intelligence, inside your own Filament panel. Bring your own API keys; one key is enough to start.
 
-> **Status: in development (Milestone 3 of 8).** Setup, engines, brands, prompts, keywords, settings, health monitoring, tracking runs and **reports** work. Competitor intelligence, sentiment, prompt generation and alerts land in the next milestones. See [`docs/SPEC.md`](docs/SPEC.md) for the full plan.
+> **Status: in development (Milestone 4 of 8).** Setup, engines, brands, prompts, keywords, settings, health monitoring, tracking runs, reports and **competitor intelligence** work. Sentiment, prompt generation and alert rules land in the next milestones. See [`docs/SPEC.md`](docs/SPEC.md) for the full plan.
 
 ## Requirements
 
@@ -100,6 +100,19 @@ Before a run starts, it's refused (with the reason) if setup is unfinished, "Pau
 
 Only successful answers count in reports. Answers skipped because an engine was paused are left out, and charts show those days as gaps rather than a drop to zero.
 
+## Competitor intelligence
+
+After each run, AI Visibility looks for companies the AI engines mention alongside your brand:
+
+1. **Names**: company and product names in the answers, even without a link (one AI helper call per ~8 answers; can be turned off).
+2. **Sites**: every cited domain that isn't yours or a tracked competitor. Search engines and link shorteners are ignored, and you can add your own exclusions. A name and its domain ("Globex" and globex.io) become one candidate.
+3. **Score** (0–100): how many answers, prompts and engines it appears in, how early it's named, and how recently.
+4. **Classify**: the top candidates (25 per brand by default) are labelled from **evidence**: their homepage and about page, and the sentences the answers used to describe them. The labels are direct competitor, indirect competitor, marketplace, review/comparison, media, forum, directory, related tool, supplier/partner, your own property, or unrelated, each with a confidence and a reason.
+
+The **Discovered** screen lists them by score. **Track** turns a candidate into a competitor and updates past answers, so it shows up in share of voice straight away. You can also mark candidates as **Not a competitor**, **Ignore forever**, or **Change label**. Label corrections are shown to the classifier as examples next time, so it learns what you mean. Labels also categorise sources (a site labelled "review/comparison" counts as a review source in the Sources report).
+
+The setup wizard can **Suggest competitors** for a new brand, and **Settings → AI instructions** lets you replace the instructions used for classification, name extraction and suggestions.
+
 ## One key is enough
 
 Every feature works with a single API key. Helper features (analysis, competitor classification, prompt generation) use the first engine with a working key, in the order OpenAI → Anthropic → Gemini → Grok → Perplexity, and switch automatically if that engine pauses. You can pin a specific engine and model in **Settings → AI helpers**.
@@ -164,6 +177,7 @@ AiVisibilityPlugin::make()
 | `ai-visibility:engines {--test} {--resume=openai}` | Show engine states, test keys, or resume an engine |
 | `ai-visibility:run {--due} {--brand=ID}` | Start due scheduled runs (runs every 15 minutes from the scheduler), or one brand now |
 | `ai-visibility:probe` | Re-test paused engines and resume those that work (runs every 5 minutes) |
+| `ai-visibility:discover {--brand=ID} {--queue}` | Find, score and classify competitors (runs after every run, and daily) |
 
 ## Costs
 

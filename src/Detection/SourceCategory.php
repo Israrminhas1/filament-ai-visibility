@@ -3,6 +3,7 @@
 namespace IsrarMinhas\FilamentAiVisibility\Detection;
 
 use IsrarMinhas\FilamentAiVisibility\Models\Brand;
+use IsrarMinhas\FilamentAiVisibility\Models\Candidate;
 
 /**
  * Groups cited domains: the brand's own site, competitors, then the curated
@@ -84,6 +85,27 @@ class SourceCategory
             }
         }
 
-        return self::OTHER;
+        // Fall back to how the domain was classified as a candidate (review site, marketplace…).
+        return $this->candidateCategories($brand)[Domains::registrable($url)] ?? self::OTHER;
+    }
+
+    /**
+     * @var array<int, array<string, string>>
+     */
+    protected array $candidateCategories = [];
+
+    /**
+     * @return array<string, string> domain => category, for the brand's labelled candidates
+     */
+    protected function candidateCategories(Brand $brand): array
+    {
+        return $this->candidateCategories[$brand->getKey()] ??= Candidate::query()
+            ->where('brand_id', $brand->getKey())
+            ->whereNotNull('domain')
+            ->whereNotNull('label')
+            ->get(['domain', 'label'])
+            ->mapWithKeys(fn (Candidate $candidate) => [$candidate->domain => $candidate->label?->sourceCategory()])
+            ->filter(fn ($category) => $category !== null && ! in_array($category, [self::OWN, self::COMPETITOR], true))
+            ->all();
     }
 }

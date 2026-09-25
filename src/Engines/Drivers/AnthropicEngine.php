@@ -4,6 +4,8 @@ namespace IsrarMinhas\FilamentAiVisibility\Engines\Drivers;
 
 use Illuminate\Http\Client\PendingRequest;
 use Illuminate\Http\Client\Response;
+use IsrarMinhas\FilamentAiVisibility\Engines\CompletionResponse;
+use IsrarMinhas\FilamentAiVisibility\Engines\CompletionRequest;
 use IsrarMinhas\FilamentAiVisibility\Engines\EngineRequest;
 use IsrarMinhas\FilamentAiVisibility\Engines\EngineResponse;
 
@@ -139,5 +141,32 @@ class AnthropicEngine extends HttpEngine
     protected function parseAnswer(Response $response, EngineRequest $request): EngineResponse
     {
         throw new \LogicException('AnthropicEngine overrides ask().');
+    }
+
+    public function complete(CompletionRequest $request): CompletionResponse
+    {
+        $response = $this->send(fn () => $this->http($request->apiKey)->post('/messages', array_filter([
+            'model' => $request->model,
+            'max_tokens' => $request->maxTokens,
+            'system' => $request->system,
+            'messages' => [['role' => 'user', 'content' => $request->prompt . $this->jsonInstruction($request)]],
+        ])));
+
+        return new CompletionResponse(
+            text: collect($response->json('content', []))->where('type', 'text')->pluck('text')->implode(''),
+            model: $response->json('model') ?? $request->model,
+            inputTokens: $response->json('usage.input_tokens'),
+            outputTokens: $response->json('usage.output_tokens'),
+        );
+    }
+
+    protected function sendCompletion(PendingRequest $http, CompletionRequest $request): Response
+    {
+        throw new \LogicException('AnthropicEngine overrides complete().');
+    }
+
+    protected function parseCompletion(Response $response, CompletionRequest $request): CompletionResponse
+    {
+        throw new \LogicException('AnthropicEngine overrides complete().');
     }
 }

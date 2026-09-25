@@ -1,0 +1,87 @@
+<?php
+
+use Illuminate\Database\Migrations\Migration;
+use Illuminate\Database\Schema\Blueprint;
+use Illuminate\Support\Facades\Schema;
+
+return new class extends Migration
+{
+    protected function table(string $name): string
+    {
+        return config('ai-visibility.table_prefix', 'ai_visibility_') . $name;
+    }
+
+    public function up(): void
+    {
+        Schema::table($this->table('results'), function (Blueprint $table) {
+            $table->timestamp('entities_extracted_at')->nullable();
+        });
+
+        Schema::create($this->table('candidates'), function (Blueprint $table) {
+            $table->id();
+            $table->string('tenant_id')->nullable()->index();
+            $table->foreignId('brand_id')->constrained($this->table('brands'))->cascadeOnDelete();
+            $table->string('key');
+            $table->string('kind');
+            $table->string('name');
+            $table->string('domain')->nullable();
+            $table->unsignedInteger('answers')->default(0);
+            $table->unsignedInteger('prompts')->default(0);
+            $table->json('engines')->nullable();
+            $table->decimal('avg_position', 6, 2)->nullable();
+            $table->timestamp('first_seen_at')->nullable();
+            $table->timestamp('last_seen_at')->nullable();
+            $table->unsignedTinyInteger('score')->default(0);
+            $table->string('status')->default('new');
+            $table->string('label')->nullable();
+            $table->string('confidence')->nullable();
+            $table->unsignedBigInteger('competitor_id')->nullable()->index();
+            $table->timestamp('classified_at')->nullable();
+            $table->timestamps();
+
+            $table->unique(['brand_id', 'key']);
+            $table->index(['brand_id', 'status', 'score']);
+        });
+
+        Schema::create($this->table('classifications'), function (Blueprint $table) {
+            $table->id();
+            $table->foreignId('candidate_id')->constrained($this->table('candidates'))->cascadeOnDelete();
+            $table->string('label');
+            $table->boolean('is_direct_competitor')->default(false);
+            $table->string('confidence');
+            $table->string('company_name')->nullable();
+            $table->text('offering_summary')->nullable();
+            $table->text('reason')->nullable();
+            $table->json('evidence')->nullable();
+            $table->string('engine')->nullable();
+            $table->string('model')->nullable();
+            $table->string('override_label')->nullable();
+            $table->unsignedBigInteger('overridden_by')->nullable();
+            $table->timestamp('overridden_at')->nullable();
+            $table->timestamps();
+        });
+
+        Schema::create($this->table('domain_profiles'), function (Blueprint $table) {
+            $table->id();
+            $table->string('domain')->unique();
+            $table->string('title')->nullable();
+            $table->text('description')->nullable();
+            $table->json('headings')->nullable();
+            $table->text('excerpt')->nullable();
+            $table->string('status')->default('ok');
+            $table->timestamp('fetched_at')->nullable();
+            $table->timestamps();
+        });
+    }
+
+    public function down(): void
+    {
+        Schema::dropIfExists($this->table('classifications'));
+        Schema::dropIfExists($this->table('candidates'));
+        Schema::dropIfExists($this->table('domain_profiles'));
+
+        Schema::table($this->table('results'), function (Blueprint $table) {
+            $table->dropColumn('entities_extracted_at');
+        });
+    }
+};

@@ -229,6 +229,35 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Competitor discovery
+    |--------------------------------------------------------------------------
+    */
+    'discovery' => [
+        // Answers from this many days are used to find and score candidates.
+        'window_days' => 90,
+        // Fetched website evidence is reused for this many days.
+        'evidence_days' => 30,
+        // Candidates per classification request, and answers per name-extraction request.
+        'classification_batch' => 10,
+        'extraction_batch' => 8,
+        // How candidates are scored (0–100). Weights are relative.
+        'weights' => [
+            'answers' => 0.35,
+            'prompts' => 0.25,
+            'engines' => 0.20,
+            'position' => 0.10,
+            'recency' => 0.10,
+        ],
+        // Never treated as competitors (search engines, link shorteners…).
+        'ignored_domains' => [
+            'google.com', 'bing.com', 'duckduckgo.com', 'yahoo.com', 'baidu.com', 'yandex.com',
+            'googleusercontent.com', 'gstatic.com', 'vertexaisearch.cloud.google.com',
+            't.co', 'bit.ly', 'goo.gl', 'archive.org', 'web.archive.org',
+        ],
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
     | Tracking requests
     |--------------------------------------------------------------------------
     */
@@ -293,6 +322,21 @@ return [
         'helpers' => [
             'engine' => 'auto',
             'model' => null,
+        ],
+        'discovery' => [
+            'enabled' => true,
+            'extract_names' => true,
+            'classify' => true,
+            'top_n' => 25,
+            'auto_accept' => false,
+            'reclassify_days' => 90,
+            'ignored_domains' => [],
+        ],
+        // Custom AI instructions; empty means the built-in default.
+        'instructions' => [
+            'classification' => null,
+            'extraction' => null,
+            'suggest_competitors' => null,
         ],
         'alerts' => [
             'user_ids' => [],

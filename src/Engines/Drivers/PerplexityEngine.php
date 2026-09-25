@@ -4,6 +4,8 @@ namespace IsrarMinhas\FilamentAiVisibility\Engines\Drivers;
 
 use Illuminate\Http\Client\PendingRequest;
 use Illuminate\Http\Client\Response;
+use IsrarMinhas\FilamentAiVisibility\Engines\CompletionResponse;
+use IsrarMinhas\FilamentAiVisibility\Engines\CompletionRequest;
 use IsrarMinhas\FilamentAiVisibility\Engines\EngineRequest;
 use IsrarMinhas\FilamentAiVisibility\Engines\EngineResponse;
 
@@ -66,6 +68,29 @@ class PerplexityEngine extends HttpEngine
         return new EngineResponse(
             answer: trim((string) $response->json('choices.0.message.content')),
             citations: EngineResponse::uniqueCitations($citations),
+            model: $response->json('model') ?? $request->model,
+            inputTokens: $response->json('usage.prompt_tokens'),
+            outputTokens: $response->json('usage.completion_tokens'),
+            searches: 1,
+        );
+    }
+
+    protected function sendCompletion(PendingRequest $http, CompletionRequest $request): Response
+    {
+        return $http->post('/chat/completions', [
+            'model' => $request->model,
+            'max_tokens' => $request->maxTokens,
+            'messages' => array_values(array_filter([
+                $request->system ? ['role' => 'system', 'content' => $request->system] : null,
+                ['role' => 'user', 'content' => $request->prompt . $this->jsonInstruction($request)],
+            ])),
+        ]);
+    }
+
+    protected function parseCompletion(Response $response, CompletionRequest $request): CompletionResponse
+    {
+        return new CompletionResponse(
+            text: (string) $response->json('choices.0.message.content'),
             model: $response->json('model') ?? $request->model,
             inputTokens: $response->json('usage.prompt_tokens'),
             outputTokens: $response->json('usage.completion_tokens'),

@@ -4,6 +4,8 @@ namespace IsrarMinhas\FilamentAiVisibility\Engines\Drivers;
 
 use Illuminate\Http\Client\PendingRequest;
 use Illuminate\Http\Client\Response;
+use IsrarMinhas\FilamentAiVisibility\Engines\CompletionResponse;
+use IsrarMinhas\FilamentAiVisibility\Engines\CompletionRequest;
 use IsrarMinhas\FilamentAiVisibility\Engines\EngineRequest;
 use IsrarMinhas\FilamentAiVisibility\Engines\EngineResponse;
 
@@ -92,5 +94,32 @@ class GeminiEngine extends HttpEngine
     protected static function isRedirect(string $url): bool
     {
         return str_contains($url, 'vertexaisearch.cloud.google.com') || str_contains($url, 'grounding-api-redirect');
+    }
+
+    protected function sendCompletion(PendingRequest $http, CompletionRequest $request): Response
+    {
+        $body = [
+            'contents' => [['role' => 'user', 'parts' => [['text' => $request->prompt]]]],
+            'generationConfig' => array_filter([
+                'maxOutputTokens' => $request->maxTokens,
+                'responseMimeType' => $request->json ? 'application/json' : null,
+            ]),
+        ];
+
+        if ($request->system) {
+            $body['systemInstruction'] = ['parts' => [['text' => $request->system]]];
+        }
+
+        return $http->post('/models/' . rawurlencode($request->model) . ':generateContent', $body);
+    }
+
+    protected function parseCompletion(Response $response, CompletionRequest $request): CompletionResponse
+    {
+        return new CompletionResponse(
+            text: collect($response->json('candidates.0.content.parts', []))->pluck('text')->filter()->implode(''),
+            model: $response->json('modelVersion') ?? $request->model,
+            inputTokens: $response->json('usageMetadata.promptTokenCount'),
+            outputTokens: $response->json('usageMetadata.candidatesTokenCount'),
+        );
     }
 }

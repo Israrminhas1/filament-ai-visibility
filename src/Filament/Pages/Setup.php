@@ -26,6 +26,8 @@ use Filament\Support\Exceptions\Halt;
 use Illuminate\Support\Facades\Blade;
 use Illuminate\Support\HtmlString;
 use IsrarMinhas\FilamentAiVisibility\AiVisibilityPlugin;
+use IsrarMinhas\FilamentAiVisibility\Competitors\CompetitorSuggester;
+use IsrarMinhas\FilamentAiVisibility\Exceptions\HelperUnavailable;
 use IsrarMinhas\FilamentAiVisibility\Engines\EngineManager;
 use IsrarMinhas\FilamentAiVisibility\Engines\EngineRegistry;
 use IsrarMinhas\FilamentAiVisibility\Enums\KeywordSource;
@@ -396,6 +398,38 @@ class Setup extends Page
         Notification::make()->title('Details filled in from ' . $domain)->body('Check them before continuing.')->success()->send();
     }
 
+    /**
+     * Add AI-suggested competitors to the list, for the user to review before continuing.
+     */
+    protected function suggestCompetitors(Get $get, Set $set): void
+    {
+        $brand = $this->brand();
+        $rows = collect($get('competitors') ?? []);
+
+        try {
+            $suggestions = app(CompetitorSuggester::class)->suggest($brand, $rows->pluck('name')->filter()->all());
+        } catch (HelperUnavailable $e) {
+            Notification::make()->title('Could not suggest competitors')->body($e->getMessage())->warning()->send();
+
+            return;
+        }
+
+        $max = app(Limits::class)->maxCompetitors($brand);
+        $room = $max === null ? count($suggestions) : max(0, $max - $rows->count());
+
+        foreach (array_slice($suggestions, 0, $room) as $suggestion) {
+            $rows->put((string) str()->uuid(), ['name' => $suggestion['name'], 'domain' => $suggestion['domain']]);
+        }
+
+        $set('competitors', $rows->all());
+
+        Notification::make()
+            ->title('Added ' . min($room, count($suggestions)) . ' suggestions')
+            ->body('Remove any that are not real competitors, then continue.')
+            ->success()
+            ->send();
+    }
+
     protected function competitorsStep(): Step
     {
         return Step::make('Competitors')
@@ -403,6 +437,13 @@ class Setup extends Page
             ->description('Who to compare with')
             ->schema([
                 Text::make('Add the competitors you already know. AI Visibility also discovers competitors from AI answers later, so a few is enough.'),
+                Actions::make([
+                    Action::make('suggestCompetitors')
+                        ->label('Suggest with AI')
+                        ->icon('heroicon-o-sparkles')
+                        ->color('gray')
+                        ->action(fn (Get $get, Set $set) => $this->suggestCompetitors($get, $set)),
+                ])->key('competitorActions'),
                 Repeater::make('competitors')
                     ->hiddenLabel()
                     ->columns(2)

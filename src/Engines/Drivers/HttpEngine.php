@@ -5,6 +5,8 @@ namespace IsrarMinhas\FilamentAiVisibility\Engines\Drivers;
 use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Http\Client\PendingRequest;
 use Illuminate\Http\Client\Response;
+use IsrarMinhas\FilamentAiVisibility\Engines\CompletionResponse;
+use IsrarMinhas\FilamentAiVisibility\Engines\CompletionRequest;
 use Illuminate\Support\Facades\Http;
 use IsrarMinhas\FilamentAiVisibility\Engines\Contracts\Engine;
 use IsrarMinhas\FilamentAiVisibility\Engines\EngineRequest;
@@ -150,5 +152,25 @@ abstract class HttpEngine implements Engine
         return Http::timeout(config('ai-visibility.http.timeout', 60))
             ->acceptJson()
             ->asJson();
+    }
+
+    public function complete(CompletionRequest $request): CompletionResponse
+    {
+        return $this->parseCompletion($this->send(fn () => $this->sendCompletion($this->http($request->apiKey), $request)), $request);
+    }
+
+    /**
+     * A plain request without web search.
+     */
+    abstract protected function sendCompletion(PendingRequest $http, CompletionRequest $request): Response;
+
+    abstract protected function parseCompletion(Response $response, CompletionRequest $request): CompletionResponse;
+
+    /**
+     * The instruction to add when JSON output is required.
+     */
+    protected function jsonInstruction(CompletionRequest $request): string
+    {
+        return $request->json ? "\n\nRespond with valid JSON only, without code fences or comments." : '';
     }
 }

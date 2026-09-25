@@ -5,6 +5,7 @@ namespace IsrarMinhas\FilamentAiVisibility\Filament\Resources\BrandResource\Page
 use Filament\Actions\DeleteAction;
 use Filament\Resources\Pages\EditRecord;
 use IsrarMinhas\FilamentAiVisibility\Filament\Actions\RunNowAction;
+use IsrarMinhas\FilamentAiVisibility\Filament\Resources\CandidateResource\Pages\ListCandidates;
 use IsrarMinhas\FilamentAiVisibility\Filament\Concerns\HandlesLimitExceptions;
 use IsrarMinhas\FilamentAiVisibility\Filament\Resources\BrandResource;
 use IsrarMinhas\FilamentAiVisibility\Filament\Resources\BrandResource\Pages\Concerns\CleansBrandSettings;
@@ -20,6 +21,7 @@ class EditBrand extends EditRecord
     {
         return [
             RunNowAction::make(fn () => $this->getRecord()),
+            ListCandidates::discoverAction(fn () => $this->getRecord())->label('Discover competitors')->color('gray'),
             DeleteAction::make(),
         ];
     }

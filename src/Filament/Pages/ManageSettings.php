@@ -6,6 +6,7 @@ use Filament\Actions\Action;
 use Filament\Forms\Components\CheckboxList;
 use Filament\Forms\Components\Select;
 use Filament\Forms\Components\TagsInput;
+use Filament\Forms\Components\Textarea;
 use Filament\Forms\Components\TextInput;
 use Filament\Forms\Components\TimePicker;
 use Filament\Forms\Components\Toggle;
@@ -23,6 +24,7 @@ use IsrarMinhas\FilamentAiVisibility\Enums\RunFrequency;
 use IsrarMinhas\FilamentAiVisibility\Engines\EngineRegistry;
 use IsrarMinhas\FilamentAiVisibility\Filament\Concerns\HasAiVisibilityNavigation;
 use IsrarMinhas\FilamentAiVisibility\Filament\Forms\EngineFields;
+use IsrarMinhas\FilamentAiVisibility\Support\Instructions;
 use IsrarMinhas\FilamentAiVisibility\Support\Settings;
 
 class ManageSettings extends Page
@@ -152,6 +154,45 @@ class ManageSettings extends Page
                                 ->helperText('Only used when a specific engine is chosen above.'),
                         ]),
 
+                    Tab::make('Competitors')
+                        ->icon('heroicon-o-magnifying-glass-circle')
+                        ->schema([
+                            Toggle::make('discovery.enabled')
+                                ->label('Discover competitors in answers')
+                                ->helperText('After each run, names and sites mentioned alongside the brand are collected and scored.'),
+                            Toggle::make('discovery.extract_names')
+                                ->label('Find names mentioned without a link')
+                                ->helperText('Uses one AI helper call per ~8 answers. Without it, only cited websites are found.'),
+                            Toggle::make('discovery.classify')
+                                ->label('Classify the top candidates')
+                                ->helperText('Reads each candidate\'s website and labels it (direct competitor, review site, marketplace…).'),
+                            TextInput::make('discovery.top_n')
+                                ->label('Candidates to classify per brand')
+                                ->numeric()
+                                ->minValue(1)
+                                ->maxValue(200),
+                            TextInput::make('discovery.reclassify_days')
+                                ->label('Re-check classifications after (days)')
+                                ->numeric()
+                                ->minValue(7),
+                            Toggle::make('discovery.auto_accept')
+                                ->label('Automatically track high-confidence direct competitors')
+                                ->helperText('Off by default: you review each one first.'),
+                            TagsInput::make('discovery.ignored_domains')
+                                ->label('Never suggest these domains')
+                                ->placeholder('example.com'),
+                        ]),
+
+                    Tab::make('AI instructions')
+                        ->icon('heroicon-o-document-text')
+                        ->schema(collect(Instructions::labels())->map(fn (string $label, string $key) => Textarea::make("instructions.{$key}")
+                            ->label($label)
+                            ->rows(8)
+                            ->placeholder(Instructions::default($key))
+                            ->helperText('Leave empty to use the built-in instruction (shown greyed out). Placeholders: ' . collect(Instructions::placeholders()[$key])->map(fn ($p) => '{' . $p . '}')->implode(', ')))
+                            ->values()
+                            ->all()),
+
                     Tab::make('Alerts')
                         ->icon('heroicon-o-bell-alert')
                         ->schema(static::alertComponents()),
@@ -250,6 +291,22 @@ class ManageSettings extends Page
                 'slack_webhook' => $state['alerts']['slack_webhook'] ?? null,
             ],
             'data' => $state['data'] ?? [],
+            'discovery' => [
+                'enabled' => (bool) ($state['discovery']['enabled'] ?? true),
+                'extract_names' => (bool) ($state['discovery']['extract_names'] ?? true),
+                'classify' => (bool) ($state['discovery']['classify'] ?? true),
+                'top_n' => (int) ($state['discovery']['top_n'] ?? 25),
+                'reclassify_days' => (int) ($state['discovery']['reclassify_days'] ?? 90),
+                'auto_accept' => (bool) ($state['discovery']['auto_accept'] ?? false),
+                'ignored_domains' => array_values(array_filter(array_map(
+                    fn ($domain) => \IsrarMinhas\FilamentAiVisibility\Models\Brand::normalizeDomain((string) $domain),
+                    $state['discovery']['ignored_domains'] ?? [],
+                ))),
+            ],
+            // Empty or unchanged instructions fall back to the built-in default.
+            'instructions' => collect($state['instructions'] ?? [])
+                ->map(fn ($text, $key) => filled($text) && trim($text) !== trim(Instructions::default($key)) ? $text : '')
+                ->all(),
         ]);
 
         $settings->setKillSwitch((bool) ($state['kill_switch'] ?? false));

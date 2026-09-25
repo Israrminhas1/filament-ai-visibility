@@ -1,5 +1,17 @@
 # Changelog
 
+## Unreleased — Milestone 4 (competitor intelligence)
+
+- Helper AI calls (no web search) on every engine, with the same pausing, budgets and cost tracking as tracking; works with any single key.
+- Name extraction: companies and products mentioned in answers without a link.
+- Competitor discovery from names and cited domains (merged when they match), scored 0–100 by reach, engines, position and recency.
+- Evidence-based classification into 11 labels using the candidate's website and how answers described it; confidence and reason stored.
+- "Discovered" review screen: track, reject, ignore, relabel (single and bulk); tracking backfills past answers so share of voice updates immediately.
+- The classifier learns from the user's label corrections per brand; optional auto-tracking of high-confidence direct competitors.
+- Candidate labels categorise sources in reports.
+- "Suggest competitors" in the setup wizard; editable AI instructions in Settings.
+- `ai-visibility:discover` command; discovery runs after each run and daily.
+
 ## Unreleased — Milestone 3 (reports)
 
 - Overview dashboard with brand, period, engine and topic filters: visibility, share of voice, citation rate and average position with period-over-period change; visibility trend per engine; share of voice; visibility by engine; top sources; prompts gained, lost and least visible; banner when tracking is interrupted.
