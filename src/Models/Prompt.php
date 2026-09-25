@@ -5,9 +5,11 @@ namespace IsrarMinhas\FilamentAiVisibility\Models;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\BelongsToMany;
+use Illuminate\Database\Eloquent\Relations\HasMany;
 use IsrarMinhas\FilamentAiVisibility\Enums\PromptIntent;
 use IsrarMinhas\FilamentAiVisibility\Enums\PromptSource;
 use IsrarMinhas\FilamentAiVisibility\Enums\PromptStatus;
+use IsrarMinhas\FilamentAiVisibility\Enums\ResultStatus;
 use IsrarMinhas\FilamentAiVisibility\Models\Concerns\BelongsToBrand;
 use IsrarMinhas\FilamentAiVisibility\Support\Limits;
 use IsrarMinhas\FilamentAiVisibility\Support\Text;
@@ -52,9 +54,27 @@ class Prompt extends Model
         return $this->belongsTo(Topic::class);
     }
 
+    public function results(): HasMany
+    {
+        return $this->hasMany(Result::class);
+    }
+
     public function keywords(): BelongsToMany
     {
         return $this->belongsToMany(Keyword::class, static::prefixedTable('keyword_prompt'));
+    }
+
+    /**
+     * Adds `answers_30d` and `mentioned_30d` (successful answers in the last 30 days).
+     */
+    public function scopeWithVisibility(Builder $query, int $days = 30): Builder
+    {
+        $since = now()->subDays($days);
+
+        return $query->withCount([
+            "results as answers_{$days}d" => fn ($q) => $q->where('status', ResultStatus::Success)->where('ran_at', '>=', $since),
+            "results as mentioned_{$days}d" => fn ($q) => $q->where('status', ResultStatus::Success)->where('ran_at', '>=', $since)->where('brand_mentioned', true),
+        ]);
     }
 
     public function scopeActive(Builder $query): Builder

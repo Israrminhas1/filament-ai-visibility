@@ -209,6 +209,26 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Source categories
+    |--------------------------------------------------------------------------
+    |
+    | Cited domains are grouped into categories for the Sources report. Brand
+    | and competitor domains are always "own" / "competitor". Add your own
+    | domains to these lists; subdomains match automatically.
+    |
+    */
+    'source_categories' => [
+        'review_comparison' => ['g2.com', 'capterra.com', 'trustpilot.com', 'getapp.com', 'softwareadvice.com', 'trustradius.com', 'gartner.com', 'clutch.co', 'yelp.com', 'tripadvisor.com', 'consumerreports.org', 'which.co.uk', 'pcmag.com', 'techradar.com', 'tomsguide.com', 'wirecutter.com', 'rtings.com', 'producthunt.com', 'sitejabber.com', 'glassdoor.com'],
+        'forum_community' => ['reddit.com', 'quora.com', 'stackexchange.com', 'stackoverflow.com', 'news.ycombinator.com', 'discord.com', 'community.spiceworks.com', 'mumsnet.com', 'forums.whirlpool.net.au'],
+        'social' => ['youtube.com', 'linkedin.com', 'x.com', 'twitter.com', 'facebook.com', 'instagram.com', 'tiktok.com', 'medium.com', 'substack.com', 'pinterest.com'],
+        'marketplace' => ['amazon.com', 'amazon.co.uk', 'ebay.com', 'ebay.co.uk', 'etsy.com', 'walmart.com', 'aliexpress.com', 'bestbuy.com', 'argos.co.uk', 'apps.apple.com', 'play.google.com', 'appsumo.com', 'shopify.com'],
+        'wiki_reference' => ['wikipedia.org', 'wikihow.com', 'britannica.com', 'investopedia.com', 'merriam-webster.com', 'dictionary.com'],
+        'media_publisher' => ['forbes.com', 'nytimes.com', 'theguardian.com', 'bbc.co.uk', 'bbc.com', 'cnn.com', 'reuters.com', 'bloomberg.com', 'techcrunch.com', 'theverge.com', 'wired.com', 'businessinsider.com', 'cnet.com', 'zdnet.com', 'hubspot.com', 'entrepreneur.com', 'inc.com', 'fastcompany.com'],
+        'government_education' => ['.gov', '.gov.uk', '.edu', '.ac.uk', '.gov.au', '.edu.au', '.europa.eu'],
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
     | Tracking requests
     |--------------------------------------------------------------------------
     */

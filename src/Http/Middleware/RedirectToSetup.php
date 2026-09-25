@@ -20,7 +20,7 @@ class RedirectToSetup
     {
         $route = (string) $request->route()?->getName();
 
-        if (! str_contains($route, '.ai-visibility.') || ! $request->isMethod('GET')) {
+        if (! preg_match('/\.ai-visibility(\.|$)/', $route) || ! $request->isMethod('GET')) {
             return $next($request);
         }
 

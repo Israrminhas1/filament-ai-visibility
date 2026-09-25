@@ -1,5 +1,14 @@
 # Changelog
 
+## Unreleased — Milestone 3 (reports)
+
+- Overview dashboard with brand, period, engine and topic filters: visibility, share of voice, citation rate and average position with period-over-period change; visibility trend per engine; share of voice; visibility by engine; top sources; prompts gained, lost and least visible; banner when tracking is interrupted.
+- Sources report: source categories, top cited domains, and the brand's most-cited pages.
+- Source categorisation (own, competitor, review, forum, media, social, marketplace, wiki, government/education), configurable.
+- Prompt history page with per-engine timelines and what changed between answers.
+- 30-day visibility column on prompts.
+- CSV export of answers and prompts (spreadsheet-formula safe).
+
 ## Unreleased — Milestone 2 (tracking engine)
 
 - Tracking runs on OpenAI, Anthropic, Gemini, Grok and Perplexity with web search enabled, localised to the brand's market.

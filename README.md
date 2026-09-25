@@ -2,7 +2,7 @@
 
 Track how your brand shows up in answers from ChatGPT, Claude, Gemini, Perplexity and Grok — with competitor intelligence, inside your own Filament panel. Bring your own API keys; one key is enough to start.
 
-> **Status: in development (Milestone 2 of 8).** Setup, engines, brands, prompts, keywords, settings, health monitoring and **tracking runs** work. Dashboards, reports and competitor intelligence land in the next milestones. See [`docs/SPEC.md`](docs/SPEC.md) for the full plan.
+> **Status: in development (Milestone 3 of 8).** Setup, engines, brands, prompts, keywords, settings, health monitoring, tracking runs and **reports** work. Competitor intelligence, sentiment, prompt generation and alerts land in the next milestones. See [`docs/SPEC.md`](docs/SPEC.md) for the full plan.
 
 ## Requirements
 
@@ -80,6 +80,25 @@ For every answer AI Visibility records:
 Runs start on each brand's schedule (daily, weekly or manual, at the time set in Settings), or with **Run now** on a brand, which shows the answer count and estimated cost first. The **Runs** and **Answers** screens show progress and every answer, with the brand and competitors highlighted.
 
 Before a run starts, it's refused (with the reason) if setup is unfinished, "Pause everything" is on, no engine is usable, there are no active prompts, the queue is `sync`, the daily run limit is reached, or the estimated cost exceeds the remaining budget.
+
+## Reports
+
+**Overview** (`/{panel}/ai-visibility`), filtered by brand, period (7 days to 12 months), engine and topic:
+
+- **Visibility**: % of answers that mention the brand, with the change vs the previous period
+- **Share of voice**: how often the brand is named, of all answers naming any tracked brand
+- **Cited as a source**: % of answers citing the brand's site
+- **Average position**: where the brand is named among tracked brands (1 = first)
+- Visibility over time per engine, share of voice vs competitors, visibility by engine
+- Top cited sources, and the prompts that gained, lost, or are least visible
+
+**Sources** shows where answers get their information (your site, competitors, review sites, forums, media, social, marketplaces, wikis, government/education) and which of your pages are cited most. Add your own domains to the categories in `config/ai-visibility.php`.
+
+**Prompt history** (open a prompt) shows each engine's answers over time and what changed: brand gained or lost, position moves, competitors appearing or disappearing, and new or dropped sources.
+
+**CSV export** on Answers (every answer with mentions, sources and cost, matching the table's filters) and Prompts (30-day visibility per prompt).
+
+Only successful answers count in reports. Answers skipped because an engine was paused are left out, and charts show those days as gaps rather than a drop to zero.
 
 ## One key is enough
 

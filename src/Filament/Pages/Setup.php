@@ -596,6 +596,7 @@ class Setup extends Page
 
         $this->redirect(
             ($brand ? AiVisibilityPlugin::pageUrl(BrandResource::class, 'edit', ['record' => $brand]) : null)
+                ?? AiVisibilityPlugin::pageUrl(Overview::class)
                 ?? AiVisibilityPlugin::pageUrl(BrandResource::class)
                 ?? filament()->getUrl(),
         );

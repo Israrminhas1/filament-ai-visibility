@@ -6,6 +6,7 @@ use Illuminate\Support\Facades\DB;
 use IsrarMinhas\FilamentAiVisibility\Detection\CitationExtractor;
 use IsrarMinhas\FilamentAiVisibility\Detection\Domains;
 use IsrarMinhas\FilamentAiVisibility\Detection\MentionDetector;
+use IsrarMinhas\FilamentAiVisibility\Detection\SourceCategory;
 use IsrarMinhas\FilamentAiVisibility\Engines\EngineResponse;
 use IsrarMinhas\FilamentAiVisibility\Models\Result;
 use IsrarMinhas\FilamentAiVisibility\Models\Usage;
@@ -22,6 +23,7 @@ class ResultRecorder
         protected CitationExtractor $citations,
         protected Pricing $pricing,
         protected Spend $spend,
+        protected SourceCategory $categories,
     ) {}
 
     public function record(Result $result, EngineResponse $response, int $durationMs): Result
@@ -61,6 +63,7 @@ class ResultRecorder
                     'position' => $index + 1,
                     'is_brand' => $isBrand,
                     'competitor_id' => $competitor?->getKey(),
+                    'category' => $this->categories->categorize($citation['url'], $brand, $isBrand, $competitor?->getKey()),
                 ]);
             }
 

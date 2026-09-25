@@ -100,7 +100,7 @@ abstract class TestCase extends Orchestra
         (include __DIR__ . '/../database/migrations/create_ai_visibility_tracking_tables.php.stub')->up();
     }
 
-    protected function createUser(array $attributes = []): User
+    public function createUser(array $attributes = []): User
     {
         return User::create($attributes + [
             'name' => 'Test User',
@@ -108,7 +108,7 @@ abstract class TestCase extends Orchestra
         ]);
     }
 
-    protected function createBrand(array $attributes = []): Brand
+    public function createBrand(array $attributes = []): Brand
     {
         return Brand::create($attributes + [
             'name' => 'Acme',
@@ -116,7 +116,7 @@ abstract class TestCase extends Orchestra
         ]);
     }
 
-    protected function completeSetup(): void
+    public function completeSetup(): void
     {
         app(Settings::class)->completeSetup();
     }

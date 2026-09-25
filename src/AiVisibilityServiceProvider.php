@@ -5,6 +5,7 @@ namespace IsrarMinhas\FilamentAiVisibility;
 use Illuminate\Console\Scheduling\Schedule;
 use Illuminate\Queue\Events\JobProcessing;
 use Illuminate\Support\Facades\Event;
+use Livewire\Livewire;
 use IsrarMinhas\FilamentAiVisibility\Commands\EnginesCommand;
 use IsrarMinhas\FilamentAiVisibility\Commands\HealthCommand;
 use IsrarMinhas\FilamentAiVisibility\Commands\InstallCommand;
@@ -23,6 +24,7 @@ use IsrarMinhas\FilamentAiVisibility\Events\EngineResumed;
 use IsrarMinhas\FilamentAiVisibility\Jobs\QueueHeartbeat;
 use IsrarMinhas\FilamentAiVisibility\Listeners\SendEngineAlerts;
 use IsrarMinhas\FilamentAiVisibility\Models\Heartbeat;
+use IsrarMinhas\FilamentAiVisibility\Reports\Metrics;
 use IsrarMinhas\FilamentAiVisibility\Runs\BudgetGuard;
 use IsrarMinhas\FilamentAiVisibility\Runs\RunPlanner;
 use IsrarMinhas\FilamentAiVisibility\Runs\RunProgress;
@@ -84,10 +86,26 @@ class AiVisibilityServiceProvider extends PackageServiceProvider
         $this->app->singleton(RunPlanner::class);
         $this->app->singleton(RunProgress::class);
         $this->app->singleton(BudgetGuard::class);
+        $this->app->singleton(Metrics::class);
     }
 
     public function packageBooted(): void
     {
+        // Widgets are Livewire components; register them by name so updates resolve on any panel.
+        foreach ([
+            Filament\Widgets\PausedEngines::class,
+            Filament\Widgets\VisibilityStats::class,
+            Filament\Widgets\VisibilityTrendChart::class,
+            Filament\Widgets\ShareOfVoiceChart::class,
+            Filament\Widgets\EngineVisibilityChart::class,
+            Filament\Widgets\TopSources::class,
+            Filament\Widgets\PromptMovers::class,
+            Filament\Widgets\SourceCategoriesChart::class,
+            Filament\Widgets\OwnPagesCited::class,
+        ] as $widget) {
+            Livewire::component('ai-visibility.' . str(class_basename($widget))->kebab(), $widget);
+        }
+
         // Long-running workers must see settings changed in the panel (kill switch, budgets…).
         Event::listen(JobProcessing::class, fn () => app(Settings::class)->flush());
 

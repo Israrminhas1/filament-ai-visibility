@@ -4,6 +4,7 @@ namespace IsrarMinhas\FilamentAiVisibility\Filament\Resources;
 
 use Filament\Actions\DeleteAction;
 use Filament\Actions\EditAction;
+use Filament\Actions\ViewAction;
 use Filament\Resources\Resource;
 use Filament\Schemas\Components\Utilities\Get;
 use Filament\Schemas\Schema;
@@ -46,10 +47,11 @@ class PromptResource extends Resource
     public static function table(Table $table): Table
     {
         return $table
-            ->modifyQueryUsing(fn ($query) => $query->with(['brand', 'topic']))
+            ->modifyQueryUsing(fn ($query) => $query->with(['brand', 'topic'])->withVisibility())
             ->columns(PromptTable::columns(withBrand: true))
             ->filters(PromptTable::filters(withBrand: true))
             ->recordActions([
+                ViewAction::make()->label('History'),
                 EditAction::make(),
                 DeleteAction::make(),
             ])
@@ -63,6 +65,7 @@ class PromptResource extends Resource
     {
         return [
             'index' => Pages\ManagePrompts::route('/'),
+            'view' => Pages\ViewPrompt::route('/{record}'),
         ];
     }
 }

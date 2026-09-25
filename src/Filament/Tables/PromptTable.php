@@ -34,6 +34,11 @@ class PromptTable
             $withBrand ? TextColumn::make('brand.name')->label('Brand')->sortable()->searchable() : null,
             TextColumn::make('topic.name')->label('Topic')->placeholder('—')->sortable()->toggleable(),
             TextColumn::make('intent')->badge()->sortable()->toggleable(),
+            TextColumn::make('visibility_30d')
+                ->label('Visibility (30d)')
+                ->state(fn (Prompt $record) => isset($record->answers_30d) && $record->answers_30d > 0 ? round($record->mentioned_30d / $record->answers_30d * 100) . '%' : null)
+                ->description(fn (Prompt $record) => isset($record->answers_30d) && $record->answers_30d > 0 ? "{$record->mentioned_30d} of {$record->answers_30d} answers" : null)
+                ->placeholder('No answers'),
             TextColumn::make('status')->badge()->sortable(),
             TextColumn::make('source')->badge()->toggleable(isToggledHiddenByDefault: true),
             TextColumn::make('keywords_count')->label('Keywords')->counts('keywords')->toggleable(isToggledHiddenByDefault: true),

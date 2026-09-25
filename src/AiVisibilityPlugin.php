@@ -9,6 +9,8 @@ use IsrarMinhas\FilamentAiVisibility\Engines\Contracts\Engine;
 use IsrarMinhas\FilamentAiVisibility\Engines\EngineRegistry;
 use IsrarMinhas\FilamentAiVisibility\Filament\Pages\Health;
 use IsrarMinhas\FilamentAiVisibility\Filament\Pages\ManageSettings;
+use IsrarMinhas\FilamentAiVisibility\Filament\Pages\Overview;
+use IsrarMinhas\FilamentAiVisibility\Filament\Pages\SourcesReport;
 use IsrarMinhas\FilamentAiVisibility\Filament\Pages\Setup;
 use IsrarMinhas\FilamentAiVisibility\Filament\Resources\BrandResource;
 use IsrarMinhas\FilamentAiVisibility\Filament\Resources\KeywordResource;
@@ -30,6 +32,8 @@ class AiVisibilityPlugin implements Plugin
      * @var array<string, bool>
      */
     protected array $screens = [
+        'overview' => true,
+        'sources' => true,
         'brands' => true,
         'prompts' => true,
         'keywords' => true,
@@ -128,6 +132,16 @@ class AiVisibilityPlugin implements Plugin
         return $this->setupWizard;
     }
 
+    public function overview(bool $condition = true): static
+    {
+        return $this->screen('overview', $condition);
+    }
+
+    public function sourcesReport(bool $condition = true): static
+    {
+        return $this->screen('sources', $condition);
+    }
+
     public function brands(bool $condition = true): static
     {
         return $this->screen('brands', $condition);
@@ -194,6 +208,8 @@ class AiVisibilityPlugin implements Plugin
 
         $pages = array_keys(array_filter([
             Setup::class => $this->setupWizard,
+            Overview::class => $this->screens['overview'],
+            SourcesReport::class => $this->screens['sources'],
             ManageSettings::class => $this->screens['settings'],
             Health::class => $this->screens['health'],
         ]));
