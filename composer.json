@@ -1,0 +1,66 @@
+{
+    "name": "israrminhas/filament-ai-visibility",
+    "description": "Track how your brand appears in ChatGPT, Claude, Gemini, Perplexity and Grok answers, with competitor intelligence. A Filament v4 & v5 plugin.",
+    "keywords": [
+        "laravel",
+        "filament",
+        "filament-plugin",
+        "ai-visibility",
+        "geo",
+        "generative-engine-optimization",
+        "llm-seo",
+        "brand-monitoring"
+    ],
+    "homepage": "https://github.com/Israrminhas1/filament-ai-visibility",
+    "license": "MIT",
+    "authors": [
+        {
+            "name": "Israr Minhas",
+            "role": "Developer"
+        }
+    ],
+    "require": {
+        "php": "^8.2",
+        "filament/filament": "^4.0|^5.0",
+        "illuminate/contracts": "^11.28|^12.0|^13.0",
+        "spatie/laravel-package-tools": "^1.16"
+    },
+    "require-dev": {
+        "orchestra/testbench": "^9.0|^10.0|^11.0",
+        "pestphp/pest": "^3.0|^4.0",
+        "pestphp/pest-plugin-laravel": "^3.0|^4.0",
+        "pestphp/pest-plugin-livewire": "^3.0|^4.0"
+    },
+    "suggest": {
+        "israrminhas/filament-aimonitor": "Share API keys and log every AI Visibility call's cost in AI Monitor",
+        "dompdf/dompdf": "Required for PDF reports"
+    },
+    "autoload": {
+        "psr-4": {
+            "IsrarMinhas\\FilamentAiVisibility\\": "src/"
+        }
+    },
+    "autoload-dev": {
+        "psr-4": {
+            "IsrarMinhas\\FilamentAiVisibility\\Tests\\": "tests/"
+        }
+    },
+    "scripts": {
+        "test": "vendor/bin/pest"
+    },
+    "extra": {
+        "laravel": {
+            "providers": [
+                "IsrarMinhas\\FilamentAiVisibility\\AiVisibilityServiceProvider"
+            ]
+        }
+    },
+    "config": {
+        "sort-packages": true,
+        "allow-plugins": {
+            "pestphp/pest-plugin": true
+        }
+    },
+    "minimum-stability": "dev",
+    "prefer-stable": true
+}

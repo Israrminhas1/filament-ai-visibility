@@ -1,0 +1,160 @@
+<?php
+
+use Illuminate\Database\Migrations\Migration;
+use Illuminate\Database\Schema\Blueprint;
+use Illuminate\Support\Facades\Schema;
+
+return new class extends Migration
+{
+    protected function table(string $name): string
+    {
+        return config('ai-visibility.table_prefix', 'ai_visibility_') . $name;
+    }
+
+    public function up(): void
+    {
+        Schema::create($this->table('settings'), function (Blueprint $table) {
+            $table->id();
+            $table->string('tenant_id')->nullable()->unique();
+            $table->json('settings')->nullable();
+            $table->unsignedTinyInteger('setup_step')->default(1);
+            $table->timestamp('setup_completed_at')->nullable();
+            $table->boolean('kill_switch')->default(false);
+            $table->timestamps();
+        });
+
+        Schema::create($this->table('provider_keys'), function (Blueprint $table) {
+            $table->id();
+            $table->string('tenant_id')->nullable()->index();
+            $table->string('engine');
+            $table->text('api_key');
+            $table->boolean('is_active')->default(true);
+            $table->timestamp('last_tested_at')->nullable();
+            $table->string('last_test_status')->nullable();
+            $table->timestamps();
+
+            $table->unique(['tenant_id', 'engine']);
+        });
+
+        Schema::create($this->table('engine_states'), function (Blueprint $table) {
+            $table->id();
+            $table->string('tenant_id')->nullable()->index();
+            $table->string('engine');
+            $table->string('status')->default('active');
+            $table->string('reason')->nullable();
+            $table->text('message')->nullable();
+            $table->unsignedInteger('consecutive_failures')->default(0);
+            $table->timestamp('paused_at')->nullable();
+            $table->timestamp('resume_after')->nullable();
+            $table->timestamp('next_probe_at')->nullable();
+            $table->timestamp('last_success_at')->nullable();
+            $table->timestamp('last_error_at')->nullable();
+            $table->json('last_error')->nullable();
+            $table->timestamps();
+
+            $table->unique(['tenant_id', 'engine']);
+        });
+
+        Schema::create($this->table('heartbeats'), function (Blueprint $table) {
+            $table->string('name')->primary();
+            $table->timestamp('beat_at');
+        });
+
+        Schema::create($this->table('brands'), function (Blueprint $table) {
+            $table->id();
+            $table->string('tenant_id')->nullable()->index();
+            $table->string('name');
+            $table->json('aliases')->nullable();
+            $table->json('domains')->nullable();
+            $table->json('exclusions')->nullable();
+            $table->text('description')->nullable();
+            $table->string('industry')->nullable();
+            $table->string('market')->nullable();
+            $table->string('run_frequency')->default('weekly');
+            $table->json('settings')->nullable();
+            $table->boolean('is_active')->default(true);
+            $table->string('paused_reason')->nullable();
+            $table->timestamp('last_run_at')->nullable();
+            $table->timestamps();
+        });
+
+        Schema::create($this->table('competitors'), function (Blueprint $table) {
+            $table->id();
+            $table->foreignId('brand_id')->constrained($this->table('brands'))->cascadeOnDelete();
+            $table->string('name');
+            $table->json('aliases')->nullable();
+            $table->json('domains')->nullable();
+            $table->json('exclusions')->nullable();
+            $table->string('category')->default('direct_competitor');
+            $table->string('source')->default('manual');
+            $table->string('color', 7)->nullable();
+            $table->boolean('is_active')->default(true);
+            $table->timestamps();
+        });
+
+        Schema::create($this->table('topics'), function (Blueprint $table) {
+            $table->id();
+            $table->foreignId('brand_id')->constrained($this->table('brands'))->cascadeOnDelete();
+            $table->string('name');
+            $table->text('description')->nullable();
+            $table->string('source')->default('manual');
+            $table->timestamps();
+
+            $table->unique(['brand_id', 'name']);
+        });
+
+        Schema::create($this->table('prompts'), function (Blueprint $table) {
+            $table->id();
+            $table->foreignId('brand_id')->constrained($this->table('brands'))->cascadeOnDelete();
+            $table->foreignId('topic_id')->nullable()->constrained($this->table('topics'))->nullOnDelete();
+            $table->text('text');
+            $table->string('text_hash', 64);
+            $table->json('tags')->nullable();
+            $table->string('intent')->default('discovery');
+            $table->string('source')->default('manual');
+            $table->unsignedTinyInteger('quality_score')->nullable();
+            $table->string('quality_reason')->nullable();
+            $table->string('status')->default('active');
+            $table->timestamp('last_run_at')->nullable();
+            $table->timestamps();
+
+            $table->unique(['brand_id', 'text_hash']);
+            $table->index(['brand_id', 'status']);
+        });
+
+        Schema::create($this->table('keywords'), function (Blueprint $table) {
+            $table->id();
+            $table->foreignId('brand_id')->constrained($this->table('brands'))->cascadeOnDelete();
+            $table->string('keyword');
+            $table->string('keyword_hash', 64);
+            $table->string('source')->default('manual');
+            $table->unsignedBigInteger('connection_id')->nullable();
+            $table->unsignedBigInteger('search_volume')->nullable();
+            $table->unsignedBigInteger('clicks')->nullable();
+            $table->unsignedBigInteger('impressions')->nullable();
+            $table->decimal('avg_position', 6, 2)->nullable();
+            $table->string('intent')->nullable();
+            $table->boolean('is_branded')->default(false);
+            $table->string('status')->default('active');
+            $table->json('metadata')->nullable();
+            $table->timestamp('last_synced_at')->nullable();
+            $table->timestamps();
+
+            $table->unique(['brand_id', 'keyword_hash']);
+        });
+
+        Schema::create($this->table('keyword_prompt'), function (Blueprint $table) {
+            $table->foreignId('keyword_id')->constrained($this->table('keywords'))->cascadeOnDelete();
+            $table->foreignId('prompt_id')->constrained($this->table('prompts'))->cascadeOnDelete();
+
+            $table->primary(['keyword_id', 'prompt_id']);
+        });
+    }
+
+    public function down(): void
+    {
+        foreach (['keyword_prompt', 'keywords', 'prompts', 'topics', 'competitors', 'brands', 'heartbeats', 'engine_states', 'provider_keys', 'settings'] as $table) {
+            Schema::dropIfExists($this->table($table));
+        }
+    }
+};
