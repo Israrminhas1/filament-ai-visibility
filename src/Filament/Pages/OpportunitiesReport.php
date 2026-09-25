@@ -8,51 +8,47 @@ use IsrarMinhas\FilamentAiVisibility\Filament\Concerns\HasAiVisibilityNavigation
 use IsrarMinhas\FilamentAiVisibility\Filament\Pages\Concerns\HasReportFilters;
 use IsrarMinhas\FilamentAiVisibility\Filament\Widgets;
 
-class Overview extends Dashboard
+class OpportunitiesReport extends Dashboard
 {
     use HasAiVisibilityNavigation;
     use HasReportFilters;
 
-    protected static string $routePath = '/ai-visibility';
+    protected static string $routePath = '/ai-visibility/opportunities';
 
-    protected static int $aiVisibilitySort = 1;
+    protected static int $aiVisibilitySort = 5;
 
     public static function getSlug(?Panel $panel = null): string
     {
-        return 'ai-visibility';
+        return 'ai-visibility/opportunities';
     }
 
     public static function getNavigationLabel(): string
     {
-        return 'Overview';
+        return 'Opportunities';
     }
 
     public static function getNavigationIcon(): ?string
     {
-        return 'heroicon-o-presentation-chart-line';
+        return 'heroicon-o-light-bulb';
     }
 
     public function getTitle(): string
     {
-        return 'AI visibility';
+        return 'Opportunities';
+    }
+
+    public function getSubheading(): ?string
+    {
+        return 'Where competitors are recommended and you are not, and the sites that would put you there.';
     }
 
     public function getWidgets(): array
     {
-        return [
-            Widgets\PausedEngines::class,
-            Widgets\VisibilityStats::class,
-            Widgets\VisibilityTrendChart::class,
-            Widgets\ShareOfVoiceChart::class,
-            Widgets\EngineVisibilityChart::class,
-            Widgets\TopSources::class,
-            Widgets\PromptMovers::class,
-            Widgets\BrandPerception::class,
-        ];
+        return [Widgets\Opportunities::class];
     }
 
     public function getColumns(): int | array
     {
-        return ['md' => 2, 'xl' => 3];
+        return 1;
     }
 }

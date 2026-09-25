@@ -3,6 +3,7 @@
 namespace IsrarMinhas\FilamentAiVisibility\Runs;
 
 use Illuminate\Support\Facades\DB;
+use IsrarMinhas\FilamentAiVisibility\Analysis\AnswerAnalyzer;
 use IsrarMinhas\FilamentAiVisibility\Detection\CitationExtractor;
 use IsrarMinhas\FilamentAiVisibility\Detection\Domains;
 use IsrarMinhas\FilamentAiVisibility\Detection\MentionDetector;
@@ -11,6 +12,7 @@ use IsrarMinhas\FilamentAiVisibility\Engines\EngineResponse;
 use IsrarMinhas\FilamentAiVisibility\Models\Result;
 use IsrarMinhas\FilamentAiVisibility\Models\Usage;
 use IsrarMinhas\FilamentAiVisibility\Support\Pricing;
+use IsrarMinhas\FilamentAiVisibility\Support\Settings;
 use IsrarMinhas\FilamentAiVisibility\Support\Spend;
 
 /**
@@ -84,6 +86,7 @@ class ResultRecorder
                 'error' => null,
                 'skip_reason' => null,
                 'ran_at' => now(),
+                'analysis_status' => app(Settings::class)->get('analysis.enabled', true) ? AnswerAnalyzer::PENDING : AnswerAnalyzer::OFF,
             ])->save();
 
             $result->prompt()->update(['last_run_at' => now()]);

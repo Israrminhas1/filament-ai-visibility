@@ -1,5 +1,14 @@
 # Changelog
 
+## Unreleased — Milestone 5 (analysis and competitor reports)
+
+- Answer analysis: sentiment (with score), recommendation strength and descriptors for every detected brand and competitor mention; also collects other company names, replacing the separate extraction call.
+- Deferred analysis when no helper engine is available, caught up automatically.
+- Competitors report: leaderboard with period-over-period change, engine × brand visibility heatmap, brand perception.
+- Head-to-head report against any competitor: visibility, prompts each wins, co-mention rate, descriptors, source gaps.
+- Opportunities report: prompts where competitors are named without the brand, and the sites cited in those answers.
+- Brand perception on the Overview; analysis shown on each answer.
+
 ## Unreleased — Milestone 4 (competitor intelligence)
 
 - Helper AI calls (no web search) on every engine, with the same pausing, budgets and cost tracking as tracking; works with any single key.

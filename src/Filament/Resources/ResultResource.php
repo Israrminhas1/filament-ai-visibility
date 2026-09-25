@@ -17,7 +17,9 @@ use Filament\Tables\Filters\TernaryFilter;
 use Filament\Tables\Table;
 use Illuminate\Support\HtmlString;
 use IsrarMinhas\FilamentAiVisibility\Engines\EngineRegistry;
+use IsrarMinhas\FilamentAiVisibility\Enums\Recommendation;
 use IsrarMinhas\FilamentAiVisibility\Enums\ResultStatus;
+use IsrarMinhas\FilamentAiVisibility\Enums\Sentiment;
 use IsrarMinhas\FilamentAiVisibility\Filament\Concerns\HasAiVisibilityNavigation;
 use IsrarMinhas\FilamentAiVisibility\Filament\Resources\ResultResource\Pages;
 use IsrarMinhas\FilamentAiVisibility\Models\Result;
@@ -102,6 +104,21 @@ class ResultResource extends Resource
                                             ->state(fn ($record) => "#{$record->position} {$record->label()}" . ($record->subject_type === 'brand' ? ' (you)' : ''))
                                             ->weight(fn ($record) => $record->subject_type === 'brand' ? 'bold' : null)
                                             ->helperText(fn ($record) => $record->snippet),
+                                        TextEntry::make('analysis')
+                                            ->hiddenLabel()
+                                            ->badge()
+                                            ->state(fn ($record) => array_values(array_filter([
+                                                Sentiment::tryFrom((string) $record->sentiment)?->getLabel(),
+                                                Recommendation::tryFrom((string) $record->recommendation)?->getLabel(),
+                                                ...($record->descriptors ?? []),
+                                            ])))
+                                            ->color(fn (string $state) => match ($state) {
+                                                'Positive', 'Top pick' => 'success',
+                                                'Negative', 'Cautioned against' => 'danger',
+                                                'Recommended' => 'info',
+                                                default => 'gray',
+                                            })
+                                            ->visible(fn ($record) => filled($record->sentiment) || filled($record->recommendation)),
                                     ])
                                     ->placeholder('No tracked brands mentioned.'),
                             ]),

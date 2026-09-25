@@ -240,6 +240,8 @@ return [
         // Candidates per classification request, and answers per name-extraction request.
         'classification_batch' => 10,
         'extraction_batch' => 8,
+        // Answers per analysis request.
+        'analysis_batch' => 5,
         // How candidates are scored (0–100). Weights are relative.
         'weights' => [
             'answers' => 0.35,
@@ -333,7 +335,11 @@ return [
             'ignored_domains' => [],
         ],
         // Custom AI instructions; empty means the built-in default.
+        'analysis' => [
+            'enabled' => true,
+        ],
         'instructions' => [
+            'analysis' => null,
             'classification' => null,
             'extraction' => null,
             'suggest_competitors' => null,

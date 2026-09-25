@@ -3,6 +3,7 @@
 namespace IsrarMinhas\FilamentAiVisibility\Competitors;
 
 use Illuminate\Support\Facades\Log;
+use IsrarMinhas\FilamentAiVisibility\Analysis\AnswerAnalyzer;
 use IsrarMinhas\FilamentAiVisibility\Exceptions\HelperUnavailable;
 use IsrarMinhas\FilamentAiVisibility\Models\Brand;
 use IsrarMinhas\FilamentAiVisibility\Support\Settings;
@@ -14,6 +15,7 @@ use IsrarMinhas\FilamentAiVisibility\Support\Settings;
 class CompetitorIntelligence
 {
     public function __construct(
+        protected AnswerAnalyzer $analyzer,
         protected NameExtractor $extractor,
         protected Discovery $discovery,
         protected Classifier $classifier,
@@ -25,20 +27,23 @@ class CompetitorIntelligence
      */
     public function run(Brand $brand, ?int $runId = null): array
     {
-        $report = ['extracted' => 0, 'candidates' => 0, 'classified' => 0, 'skipped' => null];
+        $report = ['analyzed' => 0, 'extracted' => 0, 'candidates' => 0, 'classified' => 0, 'skipped' => null];
 
-        if (! $this->settings->get('discovery.enabled', true)) {
-            $report['skipped'] = 'Competitor discovery is turned off in Settings.';
-
-            return $report;
-        }
-
+        // Analysis also collects other company names, so extraction is only needed without it.
         try {
-            if ($this->settings->get('discovery.extract_names', true)) {
+            if ($this->settings->get('analysis.enabled', true)) {
+                $report['analyzed'] = $this->analyzer->analyze($brand, $runId);
+            }
+
+            if ($this->settings->get('discovery.enabled', true) && $this->settings->get('discovery.extract_names', true)) {
                 $report['extracted'] = $this->extractor->extract($brand, $runId);
             }
         } catch (HelperUnavailable $e) {
             $report['skipped'] = $e->getMessage();
+        }
+
+        if (! $this->settings->get('discovery.enabled', true)) {
+            return $report;
         }
 
         $report['candidates'] = $this->discovery->discover($brand);

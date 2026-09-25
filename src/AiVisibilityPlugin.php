@@ -7,7 +7,10 @@ use Filament\Facades\Filament;
 use Filament\Panel;
 use IsrarMinhas\FilamentAiVisibility\Engines\Contracts\Engine;
 use IsrarMinhas\FilamentAiVisibility\Engines\EngineRegistry;
+use IsrarMinhas\FilamentAiVisibility\Filament\Pages\CompetitorsReport;
+use IsrarMinhas\FilamentAiVisibility\Filament\Pages\HeadToHeadReport;
 use IsrarMinhas\FilamentAiVisibility\Filament\Pages\Health;
+use IsrarMinhas\FilamentAiVisibility\Filament\Pages\OpportunitiesReport;
 use IsrarMinhas\FilamentAiVisibility\Filament\Pages\ManageSettings;
 use IsrarMinhas\FilamentAiVisibility\Filament\Pages\Overview;
 use IsrarMinhas\FilamentAiVisibility\Filament\Pages\SourcesReport;
@@ -35,6 +38,7 @@ class AiVisibilityPlugin implements Plugin
     protected array $screens = [
         'overview' => true,
         'sources' => true,
+        'competitorReports' => true,
         'brands' => true,
         'discovered' => true,
         'prompts' => true,
@@ -144,6 +148,14 @@ class AiVisibilityPlugin implements Plugin
         return $this->screen('sources', $condition);
     }
 
+    /**
+     * The Competitors, Head-to-head and Opportunities reports.
+     */
+    public function competitorReports(bool $condition = true): static
+    {
+        return $this->screen('competitorReports', $condition);
+    }
+
     public function brands(bool $condition = true): static
     {
         return $this->screen('brands', $condition);
@@ -218,6 +230,9 @@ class AiVisibilityPlugin implements Plugin
             Setup::class => $this->setupWizard,
             Overview::class => $this->screens['overview'],
             SourcesReport::class => $this->screens['sources'],
+            CompetitorsReport::class => $this->screens['competitorReports'],
+            HeadToHeadReport::class => $this->screens['competitorReports'],
+            OpportunitiesReport::class => $this->screens['competitorReports'],
             ManageSettings::class => $this->screens['settings'],
             Health::class => $this->screens['health'],
         ]));

@@ -154,9 +154,12 @@ class ManageSettings extends Page
                                 ->helperText('Only used when a specific engine is chosen above.'),
                         ]),
 
-                    Tab::make('Competitors')
+                    Tab::make('Analysis & competitors')
                         ->icon('heroicon-o-magnifying-glass-circle')
                         ->schema([
+                            Toggle::make('analysis.enabled')
+                                ->label('Analyse answers')
+                                ->helperText('Sentiment, how strongly each brand is recommended, and the words used to describe it. One AI helper call per ~5 answers; it also finds other company names, so no separate call is needed for that.'),
                             Toggle::make('discovery.enabled')
                                 ->label('Discover competitors in answers')
                                 ->helperText('After each run, names and sites mentioned alongside the brand are collected and scored.'),
@@ -291,6 +294,7 @@ class ManageSettings extends Page
                 'slack_webhook' => $state['alerts']['slack_webhook'] ?? null,
             ],
             'data' => $state['data'] ?? [],
+            'analysis' => ['enabled' => (bool) ($state['analysis']['enabled'] ?? true)],
             'discovery' => [
                 'enabled' => (bool) ($state['discovery']['enabled'] ?? true),
                 'extract_names' => (bool) ($state['discovery']['extract_names'] ?? true),

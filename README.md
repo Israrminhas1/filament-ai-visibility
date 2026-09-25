@@ -2,7 +2,7 @@
 
 Track how your brand shows up in answers from ChatGPT, Claude, Gemini, Perplexity and Grok — with competitor intelligence, inside your own Filament panel. Bring your own API keys; one key is enough to start.
 
-> **Status: in development (Milestone 4 of 8).** Setup, engines, brands, prompts, keywords, settings, health monitoring, tracking runs, reports and **competitor intelligence** work. Sentiment, prompt generation and alert rules land in the next milestones. See [`docs/SPEC.md`](docs/SPEC.md) for the full plan.
+> **Status: in development (Milestone 5 of 8).** Setup, engines, brands, prompts, keywords, settings, health monitoring, tracking runs, reports, competitor intelligence and **answer analysis with competitor reports** work. Prompt generation, topics and alert rules land in the next milestones. See [`docs/SPEC.md`](docs/SPEC.md) for the full plan.
 
 ## Requirements
 
@@ -99,6 +99,22 @@ Before a run starts, it's refused (with the reason) if setup is unfinished, "Pau
 **CSV export** on Answers (every answer with mentions, sources and cost, matching the table's filters) and Prompts (30-day visibility per prompt).
 
 Only successful answers count in reports. Answers skipped because an engine was paused are left out, and charts show those days as gaps rather than a drop to zero.
+
+## Answer analysis
+
+After each run, answers are analysed in small batches (one AI helper call per ~5 answers). For every tracked brand an answer mentions, it records:
+
+- **Sentiment**: positive, neutral or negative, with a score from -1 to 1
+- **Recommendation strength**: top pick, recommended, listed, in passing, or cautioned against
+- **Descriptors**: the words used to describe it ("affordable", "best for enterprises", "steep learning curve")
+
+The same call also picks up other company names for competitor discovery, so no extra call is needed for that. Detection decides *whether* a brand is mentioned; the analysis only describes mentions detection found. If no helper engine is available, answers are marked for later and analysed on the next pass. Turn it off in **Settings → Analysis & competitors**.
+
+## Competitor reports
+
+- **Competitors**: a leaderboard of your brand and competitors (visibility with change, share of voice, average position, how often each is named first, how often its site is cited, net sentiment, top-pick rate), a heatmap of visibility per engine, and how AI talks about you (sentiment, recommendation mix, descriptors).
+- **Head-to-head**: your brand against one competitor. Visibility, how often each is named ahead, how often they're named together, the prompts each one wins, how AI describes each, and the sites citing them but not you (and the reverse).
+- **Opportunities**: prompts where competitors are named and you aren't, ranked by how many competitors appear on how many engines, plus **where to get featured**: the sites cited in exactly those answers.
 
 ## Competitor intelligence
 

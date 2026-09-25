@@ -1,0 +1,31 @@
+<?php
+
+use Illuminate\Database\Migrations\Migration;
+use Illuminate\Database\Schema\Blueprint;
+use Illuminate\Support\Facades\Schema;
+
+return new class extends Migration
+{
+    protected function table(string $name): string
+    {
+        return config('ai-visibility.table_prefix', 'ai_visibility_') . $name;
+    }
+
+    public function up(): void
+    {
+        Schema::table($this->table('results'), function (Blueprint $table) {
+            $table->string('brand_sentiment')->nullable();
+            $table->string('brand_recommendation')->nullable();
+            $table->timestamp('analyzed_at')->nullable();
+            $table->index(['brand_id', 'analysis_status']);
+        });
+    }
+
+    public function down(): void
+    {
+        Schema::table($this->table('results'), function (Blueprint $table) {
+            $table->dropIndex(['brand_id', 'analysis_status']);
+            $table->dropColumn(['brand_sentiment', 'brand_recommendation', 'analyzed_at']);
+        });
+    }
+};

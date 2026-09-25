@@ -41,7 +41,18 @@ trait HasReportFilters
                         ->orderBy('name')
                         ->pluck('name', 'id'))
                     ->placeholder('All topics'),
+                ...$this->extraFilterComponents(),
             ]);
+    }
+
+    /**
+     * Additional filters for a specific report.
+     *
+     * @return array<\Filament\Forms\Components\Field>
+     */
+    protected function extraFilterComponents(): array
+    {
+        return [];
     }
 
     public function content(Schema $schema): Schema

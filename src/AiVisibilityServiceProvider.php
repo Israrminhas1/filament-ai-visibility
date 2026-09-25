@@ -59,6 +59,7 @@ class AiVisibilityServiceProvider extends PackageServiceProvider
                 'create_ai_visibility_tables',
                 'create_ai_visibility_tracking_tables',
                 'create_ai_visibility_competitor_tables',
+                'add_ai_visibility_analysis_columns',
             ])
             ->hasCommands([
                 InstallCommand::class,
@@ -112,6 +113,11 @@ class AiVisibilityServiceProvider extends PackageServiceProvider
             Filament\Widgets\PromptMovers::class,
             Filament\Widgets\SourceCategoriesChart::class,
             Filament\Widgets\OwnPagesCited::class,
+            Filament\Widgets\CompetitorLeaderboard::class,
+            Filament\Widgets\EngineHeatmap::class,
+            Filament\Widgets\BrandPerception::class,
+            Filament\Widgets\HeadToHead::class,
+            Filament\Widgets\Opportunities::class,
         ] as $widget) {
             Livewire::component('ai-visibility.' . str(class_basename($widget))->kebab(), $widget);
         }
@@ -121,7 +127,9 @@ class AiVisibilityServiceProvider extends PackageServiceProvider
 
         // After each run, look for competitors in the new answers.
         Event::listen(RunCompleted::class, function (RunCompleted $event) {
-            if ($event->run->results_done > 0 && Tenancy::as($event->run->tenant_id, fn () => app(Settings::class)->get('discovery.enabled', true))) {
+            $wanted = Tenancy::as($event->run->tenant_id, fn () => app(Settings::class)->get('discovery.enabled', true) || app(Settings::class)->get('analysis.enabled', true));
+
+            if ($event->run->results_done > 0 && $wanted) {
                 DiscoverCompetitorsJob::dispatch($event->run->brand_id, $event->run->tenant_id, $event->run->getKey());
             }
         });

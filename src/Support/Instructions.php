@@ -14,12 +14,15 @@ class Instructions
 
     public const SUGGEST_COMPETITORS = 'suggest_competitors';
 
+    public const ANALYSIS = 'analysis';
+
     /**
      * @return array<string, string>
      */
     public static function labels(): array
     {
         return [
+            self::ANALYSIS => 'Answer analysis',
             self::CLASSIFICATION => 'Competitor classification',
             self::EXTRACTION => 'Name extraction',
             self::SUGGEST_COMPETITORS => 'Competitor suggestions',
@@ -32,6 +35,7 @@ class Instructions
     public static function placeholders(): array
     {
         return [
+            self::ANALYSIS => ['brand', 'competitors', 'answers'],
             self::CLASSIFICATION => ['brand', 'domain', 'description', 'industry', 'market', 'competitors', 'labels', 'examples', 'candidates'],
             self::EXTRACTION => ['brand', 'answers'],
             self::SUGGEST_COMPETITORS => ['brand', 'domain', 'description', 'industry', 'market', 'existing', 'count'],
@@ -90,6 +94,24 @@ class Instructions
 
                 Return JSON: {"results": [{"key": "...", "label": "one of the label keys", "confidence": "high|medium|low", "company_name": "...", "offering_summary": "one sentence on what it offers", "reason": "one sentence on why this label"}]}
                 Include every candidate exactly once, using its key.
+                TEXT,
+
+            self::ANALYSIS => <<<'TEXT'
+                Below are answers an AI assistant gave to customer questions. The tracked brands are: {brand} (the client) and competitors {competitors}.
+
+                For each answer:
+                1. For every tracked brand the answer mentions, judge how the answer presents it:
+                   - sentiment: "positive", "neutral" or "negative" (how favourably it is described)
+                   - score: a number from -1 (very negative) to 1 (very positive)
+                   - recommendation: "top_pick" (named as the best or first choice), "recommended", "listed" (one option among others), "passing" (mentioned, not offered as an option) or "cautioned" (the answer warns against it)
+                   - descriptors: up to 5 short phrases the answer uses to describe it (e.g. "affordable", "best for enterprises", "steep learning curve")
+                2. List other companies, brands and named products it mentions as options or providers (not the tracked brands, not sources, not generic terms).
+
+                Only use what each answer says. Use the tracked brand names exactly as given above.
+
+                {answers}
+
+                Return JSON: {"answers": [{"id": 123, "mentions": [{"name": "Acme", "sentiment": "positive", "score": 0.6, "recommendation": "recommended", "descriptors": ["easy to use"]}], "other_names": ["Globex"]}]}
                 TEXT,
 
             self::EXTRACTION => <<<'TEXT'
