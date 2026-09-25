@@ -1,0 +1,122 @@
+<?php
+
+use Illuminate\Database\Migrations\Migration;
+use Illuminate\Database\Schema\Blueprint;
+use Illuminate\Support\Facades\Schema;
+
+return new class extends Migration
+{
+    protected function table(string $name): string
+    {
+        return config('ai-visibility.table_prefix', 'ai_visibility_') . $name;
+    }
+
+    public function up(): void
+    {
+        Schema::create($this->table('runs'), function (Blueprint $table) {
+            $table->id();
+            $table->string('tenant_id')->nullable()->index();
+            $table->foreignId('brand_id')->constrained($this->table('brands'))->cascadeOnDelete();
+            $table->string('trigger')->default('schedule');
+            $table->unsignedBigInteger('triggered_by')->nullable();
+            $table->string('status')->default('pending');
+            $table->string('status_reason')->nullable();
+            $table->json('engines')->nullable();
+            $table->unsignedInteger('results_total')->default(0);
+            $table->unsignedInteger('results_done')->default(0);
+            $table->unsignedInteger('results_failed')->default(0);
+            $table->unsignedInteger('results_skipped')->default(0);
+            $table->decimal('estimated_cost_usd', 12, 6)->nullable();
+            $table->decimal('cost_usd', 12, 6)->default(0);
+            $table->timestamp('started_at')->nullable();
+            $table->timestamp('finished_at')->nullable();
+            $table->timestamps();
+
+            $table->index(['brand_id', 'created_at']);
+        });
+
+        Schema::create($this->table('results'), function (Blueprint $table) {
+            $table->id();
+            $table->string('tenant_id')->nullable()->index();
+            $table->foreignId('run_id')->constrained($this->table('runs'))->cascadeOnDelete();
+            $table->foreignId('brand_id')->constrained($this->table('brands'))->cascadeOnDelete();
+            $table->foreignId('prompt_id')->constrained($this->table('prompts'))->cascadeOnDelete();
+            $table->string('engine');
+            $table->string('model')->nullable();
+            $table->unsignedTinyInteger('sample')->default(1);
+            $table->string('status')->default('pending');
+            $table->string('skip_reason')->nullable();
+            $table->string('analysis_status')->default('off');
+            $table->longText('answer')->nullable();
+            $table->string('answer_hash', 64)->nullable();
+            $table->boolean('brand_mentioned')->default(false);
+            $table->boolean('brand_cited')->default(false);
+            $table->unsignedSmallInteger('brand_position')->nullable();
+            $table->unsignedSmallInteger('brand_mention_count')->default(0);
+            $table->unsignedInteger('input_tokens')->nullable();
+            $table->unsignedInteger('output_tokens')->nullable();
+            $table->unsignedSmallInteger('searches')->nullable();
+            $table->decimal('cost_usd', 12, 8)->nullable();
+            $table->unsignedInteger('duration_ms')->nullable();
+            $table->unsignedTinyInteger('attempts')->default(0);
+            $table->text('error')->nullable();
+            $table->timestamp('ran_at')->nullable();
+            $table->timestamps();
+
+            $table->index(['brand_id', 'ran_at']);
+            $table->index(['brand_id', 'engine', 'ran_at']);
+            $table->index(['prompt_id', 'engine', 'ran_at']);
+            $table->index(['run_id', 'status']);
+        });
+
+        Schema::create($this->table('mentions'), function (Blueprint $table) {
+            $table->id();
+            $table->foreignId('result_id')->constrained($this->table('results'))->cascadeOnDelete();
+            $table->string('subject_type');
+            $table->unsignedBigInteger('subject_id')->nullable();
+            $table->string('name_matched');
+            $table->unsignedSmallInteger('position');
+            $table->unsignedSmallInteger('count')->default(1);
+            $table->text('snippet')->nullable();
+            $table->string('sentiment')->nullable();
+            $table->decimal('sentiment_score', 4, 3)->nullable();
+            $table->string('recommendation')->nullable();
+            $table->json('descriptors')->nullable();
+
+            $table->index(['subject_type', 'subject_id']);
+        });
+
+        Schema::create($this->table('citations'), function (Blueprint $table) {
+            $table->id();
+            $table->foreignId('result_id')->constrained($this->table('results'))->cascadeOnDelete();
+            $table->text('url');
+            $table->string('domain')->index();
+            $table->string('title')->nullable();
+            $table->unsignedSmallInteger('position');
+            $table->boolean('is_brand')->default(false);
+            $table->unsignedBigInteger('competitor_id')->nullable()->index();
+            $table->string('category')->nullable();
+        });
+
+        Schema::create($this->table('usage'), function (Blueprint $table) {
+            $table->id();
+            $table->string('tenant_id')->nullable()->index();
+            $table->unsignedBigInteger('brand_id')->nullable()->index();
+            $table->string('engine');
+            $table->string('model')->nullable();
+            $table->string('purpose');
+            $table->unsignedInteger('input_tokens')->nullable();
+            $table->unsignedInteger('output_tokens')->nullable();
+            $table->unsignedSmallInteger('searches')->nullable();
+            $table->decimal('cost_usd', 12, 8)->default(0);
+            $table->timestamp('created_at')->index();
+        });
+    }
+
+    public function down(): void
+    {
+        foreach (['usage', 'citations', 'mentions', 'results', 'runs'] as $table) {
+            Schema::dropIfExists($this->table($table));
+        }
+    }
+};

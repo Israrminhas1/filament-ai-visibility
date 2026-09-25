@@ -3,10 +3,13 @@
 namespace IsrarMinhas\FilamentAiVisibility;
 
 use Illuminate\Console\Scheduling\Schedule;
+use Illuminate\Queue\Events\JobProcessing;
 use Illuminate\Support\Facades\Event;
 use IsrarMinhas\FilamentAiVisibility\Commands\EnginesCommand;
 use IsrarMinhas\FilamentAiVisibility\Commands\HealthCommand;
 use IsrarMinhas\FilamentAiVisibility\Commands\InstallCommand;
+use IsrarMinhas\FilamentAiVisibility\Commands\ProbeCommand;
+use IsrarMinhas\FilamentAiVisibility\Commands\RunCommand;
 use IsrarMinhas\FilamentAiVisibility\Engines\Drivers\AnthropicEngine;
 use IsrarMinhas\FilamentAiVisibility\Engines\Drivers\GeminiEngine;
 use IsrarMinhas\FilamentAiVisibility\Engines\Drivers\GrokEngine;
@@ -20,11 +23,16 @@ use IsrarMinhas\FilamentAiVisibility\Events\EngineResumed;
 use IsrarMinhas\FilamentAiVisibility\Jobs\QueueHeartbeat;
 use IsrarMinhas\FilamentAiVisibility\Listeners\SendEngineAlerts;
 use IsrarMinhas\FilamentAiVisibility\Models\Heartbeat;
+use IsrarMinhas\FilamentAiVisibility\Runs\BudgetGuard;
+use IsrarMinhas\FilamentAiVisibility\Runs\RunPlanner;
+use IsrarMinhas\FilamentAiVisibility\Runs\RunProgress;
 use IsrarMinhas\FilamentAiVisibility\Support\Alerts\AlertNotifier;
 use IsrarMinhas\FilamentAiVisibility\Support\Health\SystemHealth;
 use IsrarMinhas\FilamentAiVisibility\Support\Importer;
 use IsrarMinhas\FilamentAiVisibility\Support\Limits;
+use IsrarMinhas\FilamentAiVisibility\Support\Pricing;
 use IsrarMinhas\FilamentAiVisibility\Support\Settings;
+use IsrarMinhas\FilamentAiVisibility\Support\Spend;
 use Spatie\LaravelPackageTools\Package;
 use Spatie\LaravelPackageTools\PackageServiceProvider;
 
@@ -41,11 +49,14 @@ class AiVisibilityServiceProvider extends PackageServiceProvider
             ->hasTranslations()
             ->hasMigrations([
                 'create_ai_visibility_tables',
+                'create_ai_visibility_tracking_tables',
             ])
             ->hasCommands([
                 InstallCommand::class,
                 HealthCommand::class,
                 EnginesCommand::class,
+                RunCommand::class,
+                ProbeCommand::class,
             ]);
     }
 
@@ -68,10 +79,18 @@ class AiVisibilityServiceProvider extends PackageServiceProvider
         $this->app->singleton(Importer::class);
         $this->app->singleton(SystemHealth::class);
         $this->app->singleton(AlertNotifier::class);
+        $this->app->singleton(Pricing::class);
+        $this->app->singleton(Spend::class);
+        $this->app->singleton(RunPlanner::class);
+        $this->app->singleton(RunProgress::class);
+        $this->app->singleton(BudgetGuard::class);
     }
 
     public function packageBooted(): void
     {
+        // Long-running workers must see settings changed in the panel (kill switch, budgets…).
+        Event::listen(JobProcessing::class, fn () => app(Settings::class)->flush());
+
         Event::listen(EnginePaused::class, [SendEngineAlerts::class, 'handlePaused']);
         Event::listen(EngineResumed::class, [SendEngineAlerts::class, 'handleResumed']);
 
@@ -84,6 +103,17 @@ class AiVisibilityServiceProvider extends PackageServiceProvider
             $schedule->job(new QueueHeartbeat)
                 ->everyFiveMinutes()
                 ->name('ai-visibility:queue-heartbeat');
+
+            // Start due runs, and bring paused engines back when they work again.
+            $schedule->command('ai-visibility:run --due')
+                ->everyFifteenMinutes()
+                ->withoutOverlapping()
+                ->name('ai-visibility:run');
+
+            $schedule->command('ai-visibility:probe')
+                ->everyFiveMinutes()
+                ->withoutOverlapping()
+                ->name('ai-visibility:probe');
         });
     }
 }

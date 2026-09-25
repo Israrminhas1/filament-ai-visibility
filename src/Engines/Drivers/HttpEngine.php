@@ -7,6 +7,9 @@ use Illuminate\Http\Client\PendingRequest;
 use Illuminate\Http\Client\Response;
 use Illuminate\Support\Facades\Http;
 use IsrarMinhas\FilamentAiVisibility\Engines\Contracts\Engine;
+use IsrarMinhas\FilamentAiVisibility\Engines\EngineRequest;
+use IsrarMinhas\FilamentAiVisibility\Engines\EngineRequestFailed;
+use IsrarMinhas\FilamentAiVisibility\Engines\EngineResponse;
 use IsrarMinhas\FilamentAiVisibility\Engines\KeyTestResult;
 use IsrarMinhas\FilamentAiVisibility\Enums\PauseReason;
 use Throwable;
@@ -52,6 +55,38 @@ abstract class HttpEngine implements Engine
             $this->errorMessage($response),
         );
     }
+
+    public function ask(EngineRequest $request): EngineResponse
+    {
+        return $this->parseAnswer($this->send(fn () => $this->sendAsk($this->http($request->apiKey), $request)), $request);
+    }
+
+    /**
+     * Send a request, turning connection problems and error responses into EngineRequestFailed.
+     *
+     * @param  callable(): Response  $send
+     */
+    protected function send(callable $send): Response
+    {
+        try {
+            $response = $send();
+        } catch (ConnectionException $e) {
+            throw EngineRequestFailed::unreachable('Could not connect to ' . $this->label() . ': ' . $e->getMessage());
+        }
+
+        if ($response->failed()) {
+            throw EngineRequestFailed::fromResponse($response, $this->label() . ': ' . $this->errorMessage($response));
+        }
+
+        return $response;
+    }
+
+    /**
+     * Send a tracked prompt with web search enabled.
+     */
+    abstract protected function sendAsk(PendingRequest $http, EngineRequest $request): Response;
+
+    abstract protected function parseAnswer(Response $response, EngineRequest $request): EngineResponse;
 
     /**
      * Make the cheapest request that proves the key works.

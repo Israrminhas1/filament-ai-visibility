@@ -27,6 +27,17 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Require setup
+    |--------------------------------------------------------------------------
+    |
+    | Runs only start once the setup wizard is complete. Set to false when
+    | everything is configured in code (with ->withoutSetupWizard()).
+    |
+    */
+    'require_setup' => true,
+
+    /*
+    |--------------------------------------------------------------------------
     | Queues
     |--------------------------------------------------------------------------
     */
@@ -83,9 +94,9 @@ return [
             'models' => ['gemini-2.5-pro', 'gemini-2.5-flash', 'gemini-2.5-flash-lite'],
         ],
         'grok' => [
-            'tracking_model' => 'grok-4',
-            'helper_model' => 'grok-4',
-            'models' => ['grok-4'],
+            'tracking_model' => 'grok-4.7',
+            'helper_model' => 'grok-4.7',
+            'models' => ['grok-4.7', 'grok-4'],
         ],
         'perplexity' => [
             'tracking_model' => 'sonar',
@@ -122,6 +133,110 @@ return [
         'gemini' => 0.01,
         'grok' => 0.02,
         'perplexity' => 0.008,
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
+    | Markets
+    |--------------------------------------------------------------------------
+    |
+    | Maps a brand's market to a country code so engines search as a user in
+    | that country would. A two-letter code (e.g. "GB") also works directly.
+    |
+    */
+    'markets' => [
+        'united kingdom' => 'GB', 'uk' => 'GB', 'great britain' => 'GB', 'england' => 'GB',
+        'united states' => 'US', 'usa' => 'US', 'us' => 'US', 'america' => 'US',
+        'canada' => 'CA', 'australia' => 'AU', 'new zealand' => 'NZ', 'ireland' => 'IE',
+        'germany' => 'DE', 'france' => 'FR', 'spain' => 'ES', 'italy' => 'IT', 'netherlands' => 'NL',
+        'belgium' => 'BE', 'sweden' => 'SE', 'norway' => 'NO', 'denmark' => 'DK', 'finland' => 'FI',
+        'poland' => 'PL', 'portugal' => 'PT', 'switzerland' => 'CH', 'austria' => 'AT',
+        'india' => 'IN', 'pakistan' => 'PK', 'united arab emirates' => 'AE', 'uae' => 'AE', 'saudi arabia' => 'SA',
+        'singapore' => 'SG', 'japan' => 'JP', 'south korea' => 'KR', 'china' => 'CN', 'hong kong' => 'HK',
+        'brazil' => 'BR', 'mexico' => 'MX', 'argentina' => 'AR', 'south africa' => 'ZA', 'nigeria' => 'NG',
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
+    | Pricing
+    |--------------------------------------------------------------------------
+    |
+    | Used to calculate spend when AI Monitor is not installed (or has no
+    | price for a model). USD per 1M tokens, plus a fee per web search.
+    | Models are matched exactly, then by prefix ("gpt-5-mini-2025..."
+    | uses "gpt-5-mini"). These are estimates: check each provider's
+    | pricing page and adjust.
+    |
+    */
+    'pricing' => [
+        'models' => [
+            'gpt-5' => [1.25, 10.00],
+            'gpt-5-mini' => [0.25, 2.00],
+            'gpt-5-nano' => [0.05, 0.40],
+            'gpt-4.1' => [2.00, 8.00],
+            'gpt-4.1-mini' => [0.40, 1.60],
+            'gpt-4o' => [2.50, 10.00],
+            'gpt-4o-mini' => [0.15, 0.60],
+            'claude-opus-5-5' => [4.00, 20.00],
+            'claude-opus-5' => [5.00, 25.00],
+            'claude-sonnet-5' => [2.00, 10.00],
+            'claude-sonnet-4-6' => [3.00, 15.00],
+            'claude-haiku-4-5' => [1.00, 5.00],
+            'gemini-2.5-pro' => [1.25, 10.00],
+            'gemini-2.5-flash' => [0.30, 2.50],
+            'gemini-2.5-flash-lite' => [0.10, 0.40],
+            'grok-4' => [3.00, 15.00],
+            'sonar-pro' => [3.00, 15.00],
+            'sonar' => [1.00, 1.00],
+        ],
+        // Per engine, used when a model has no price above.
+        'fallback' => [
+            'openai' => [1.25, 10.00],
+            'anthropic' => [3.00, 15.00],
+            'gemini' => [0.30, 2.50],
+            'grok' => [3.00, 15.00],
+            'perplexity' => [1.00, 1.00],
+        ],
+        // USD per web search / grounded request.
+        'search_fee' => [
+            'openai' => 0.01,
+            'anthropic' => 0.01,
+            'gemini' => 0.035,
+            'grok' => 0.01,
+            'perplexity' => 0.008,
+        ],
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
+    | Tracking requests
+    |--------------------------------------------------------------------------
+    */
+    'tracking' => [
+        // Max answer length requested from engines that need a limit.
+        'max_output_tokens' => 4096,
+        // Max web searches per answer, where the engine supports a limit.
+        'max_searches' => 5,
+        // Seconds a job may keep retrying (rate limits, outages) before giving up.
+        'retry_for_seconds' => 3600,
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
+    | Reliability
+    |--------------------------------------------------------------------------
+    */
+    'reliability' => [
+        // Consecutive failures before the circuit breaker pauses an engine.
+        'failure_threshold' => 5,
+        // First pause after an outage, doubled each time up to the max (minutes).
+        'outage_pause_minutes' => 15,
+        'outage_pause_max_minutes' => 240,
+        // How often an engine paused for credits is re-checked (minutes).
+        'credits_probe_minutes' => 360,
+        // Consecutive rate-limit responses before pausing; and how long a degraded engine stays slowed (minutes).
+        'rate_limit_threshold' => 5,
+        'degraded_minutes' => 30,
     ],
 
     /*

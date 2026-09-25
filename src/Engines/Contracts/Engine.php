@@ -2,6 +2,8 @@
 
 namespace IsrarMinhas\FilamentAiVisibility\Engines\Contracts;
 
+use IsrarMinhas\FilamentAiVisibility\Engines\EngineRequest;
+use IsrarMinhas\FilamentAiVisibility\Engines\EngineResponse;
 use IsrarMinhas\FilamentAiVisibility\Engines\KeyTestResult;
 
 interface Engine
@@ -44,4 +46,12 @@ interface Engine
      * Check that a key works with a cheap request.
      */
     public function testKey(string $apiKey): KeyTestResult;
+
+    /**
+     * Answer a tracked prompt the way the assistant would for its users,
+     * with web search enabled, returning the answer and its sources.
+     *
+     * @throws \IsrarMinhas\FilamentAiVisibility\Engines\EngineRequestFailed
+     */
+    public function ask(EngineRequest $request): EngineResponse;
 }

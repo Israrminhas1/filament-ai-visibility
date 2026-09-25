@@ -26,6 +26,14 @@ class Brand extends Model
         'last_run_at' => 'datetime',
     ];
 
+    /**
+     * Same as the column defaults, so new models behave correctly before being reloaded.
+     */
+    protected $attributes = [
+        'is_active' => true,
+        'run_frequency' => 'weekly',
+    ];
+
     protected static function booted(): void
     {
         static::creating(fn () => app(Limits::class)->ensureCanCreateBrand());
@@ -60,6 +68,30 @@ class Brand extends Model
     public function keywords(): HasMany
     {
         return $this->hasMany(Keyword::class);
+    }
+
+    public function runs(): HasMany
+    {
+        return $this->hasMany(Run::class);
+    }
+
+    public function results(): HasMany
+    {
+        return $this->hasMany(Result::class);
+    }
+
+    /**
+     * Two-letter country code derived from the market, for engines that localise search.
+     */
+    public function countryCode(): ?string
+    {
+        $market = trim((string) $this->market);
+
+        if (preg_match('/^[A-Za-z]{2}$/', $market)) {
+            return strtoupper($market);
+        }
+
+        return config('ai-visibility.markets.' . strtolower($market));
     }
 
     /**

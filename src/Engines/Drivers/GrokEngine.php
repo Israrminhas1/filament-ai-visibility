@@ -4,9 +4,13 @@ namespace IsrarMinhas\FilamentAiVisibility\Engines\Drivers;
 
 use Illuminate\Http\Client\PendingRequest;
 use Illuminate\Http\Client\Response;
+use IsrarMinhas\FilamentAiVisibility\Engines\Drivers\Concerns\ParsesResponsesApi;
+use IsrarMinhas\FilamentAiVisibility\Engines\EngineRequest;
 
 class GrokEngine extends HttpEngine
 {
+    use ParsesResponsesApi;
+
     public function key(): string
     {
         return 'grok';
@@ -30,5 +34,14 @@ class GrokEngine extends HttpEngine
     protected function sendKeyTest(PendingRequest $request): Response
     {
         return $request->get('/models');
+    }
+
+    protected function sendAsk(PendingRequest $http, EngineRequest $request): Response
+    {
+        return $http->post('/responses', [
+            'model' => $request->model,
+            'input' => [['role' => 'user', 'content' => $request->prompt]],
+            'tools' => [['type' => 'web_search']],
+        ]);
     }
 }

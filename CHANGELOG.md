@@ -1,5 +1,16 @@
 # Changelog
 
+## Unreleased — Milestone 2 (tracking engine)
+
+- Tracking runs on OpenAI, Anthropic, Gemini, Grok and Perplexity with web search enabled, localised to the brand's market.
+- Mention detection (brand and competitors, positions, counts, snippets; ignores URLs, partial words and exclusion phrases) and source extraction with brand/competitor matching.
+- Scheduled runs (daily/weekly at a set time), "Run now" with a cost estimate, and pre-run checks that refuse wasteful runs.
+- Engine health: circuit breaker for outages, slow-down then pause for rate limits, automatic re-tests for exhausted credits, and instant skipping of paused engines with "Retry skipped".
+- Monthly budgets (global and per brand) that stop spending mid-run and resume in the next month.
+- Cost and usage tracking per call, using AI Monitor prices when installed.
+- Runs and Answers screens; answers shown with the brand and competitors highlighted.
+- `ai-visibility:run` and `ai-visibility:probe` commands, scheduled automatically.
+
 ## Unreleased — Milestone 1 (foundation)
 
 - Setup wizard (system checks, engines and key tests, budget with cost estimate, brand pre-filled from its website, competitors, keywords, prompts, alerts).

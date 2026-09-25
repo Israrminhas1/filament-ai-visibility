@@ -13,6 +13,8 @@ use IsrarMinhas\FilamentAiVisibility\Filament\Pages\Setup;
 use IsrarMinhas\FilamentAiVisibility\Filament\Resources\BrandResource;
 use IsrarMinhas\FilamentAiVisibility\Filament\Resources\KeywordResource;
 use IsrarMinhas\FilamentAiVisibility\Filament\Resources\PromptResource;
+use IsrarMinhas\FilamentAiVisibility\Filament\Resources\ResultResource;
+use IsrarMinhas\FilamentAiVisibility\Filament\Resources\RunResource;
 use IsrarMinhas\FilamentAiVisibility\Http\Middleware\RedirectToSetup;
 use Throwable;
 
@@ -31,6 +33,8 @@ class AiVisibilityPlugin implements Plugin
         'brands' => true,
         'prompts' => true,
         'keywords' => true,
+        'runs' => true,
+        'answers' => true,
         'settings' => true,
         'health' => true,
     ];
@@ -139,6 +143,16 @@ class AiVisibilityPlugin implements Plugin
         return $this->screen('keywords', $condition);
     }
 
+    public function runs(bool $condition = true): static
+    {
+        return $this->screen('runs', $condition);
+    }
+
+    public function answers(bool $condition = true): static
+    {
+        return $this->screen('answers', $condition);
+    }
+
     public function settingsPage(bool $condition = true): static
     {
         return $this->screen('settings', $condition);
@@ -174,6 +188,8 @@ class AiVisibilityPlugin implements Plugin
             BrandResource::class => $this->screens['brands'],
             PromptResource::class => $this->screens['prompts'],
             KeywordResource::class => $this->screens['keywords'],
+            RunResource::class => $this->screens['runs'],
+            ResultResource::class => $this->screens['answers'],
         ]));
 
         $pages = array_keys(array_filter([

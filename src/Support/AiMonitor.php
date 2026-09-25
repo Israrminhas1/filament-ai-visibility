@@ -32,6 +32,24 @@ class AiMonitor
     }
 
     /**
+     * Token cost from AI Monitor's pricing table, or null when it has no price.
+     */
+    public static function cost(string $provider, ?string $model, ?int $inputTokens, ?int $outputTokens): ?float
+    {
+        $service = 'Filament\\AiMonitor\\Services\\AiPricingService';
+
+        if (! class_exists($service)) {
+            return null;
+        }
+
+        try {
+            return app($service)->calculateCost($provider, $model, $inputTokens, $outputTokens);
+        } catch (Throwable) {
+            return null;
+        }
+    }
+
+    /**
      * Log a call in AI Monitor. Failures never break AI Visibility.
      *
      * @param  array<string, mixed>  $data

@@ -142,7 +142,109 @@ class EngineManager
         return $result;
     }
 
-    public function pause(string $engine, PauseReason $reason, ?string $message = null): void
+    public function recordSuccess(string $engine): void
+    {
+        $state = $this->state($engine);
+
+        if ($state->status === EngineStatus::Paused) {
+            $this->resume($engine);
+
+            return;
+        }
+
+        $state->fill([
+            'consecutive_failures' => 0,
+            'last_success_at' => now(),
+            // A healthy call resets the outage back-off.
+            'last_error' => null,
+            'status' => $state->status === EngineStatus::Degraded && $state->resume_after?->isPast() ? EngineStatus::Active : $state->status,
+        ])->save();
+    }
+
+    /**
+     * Decide what a failed call means for the whole engine.
+     *
+     * - Key, credit and model problems pause immediately.
+     * - Rate limits slow the engine down, and pause it after repeated 429s.
+     * - Outages trip a circuit breaker after repeated failures, with growing pauses.
+     * - Anything else only fails that one request.
+     */
+    public function recordFailure(string $engine, ?PauseReason $reason, ?string $message = null, ?int $retryAfter = null): void
+    {
+        $state = $this->state($engine);
+        $failures = $state->consecutive_failures + 1;
+        $config = config('ai-visibility.reliability');
+
+        $state->fill([
+            'consecutive_failures' => $failures,
+            'last_error_at' => now(),
+            'last_error' => ['reason' => $reason?->value, 'message' => $message],
+        ])->save();
+
+        match ($reason) {
+            PauseReason::InvalidKey, PauseReason::MissingKey, PauseReason::ModelUnavailable => $this->pause($engine, $reason, $message),
+
+            PauseReason::InsufficientCredits => $this->pause($engine, $reason, $message, probeAt: now()->addMinutes((int) $config['credits_probe_minutes'])),
+
+            PauseReason::RateLimited => $failures >= (int) $config['rate_limit_threshold']
+                ? $this->pause($engine, $reason, $message, resumeAt: now()->addSeconds(max($retryAfter ?? 0, 60 * (int) $config['degraded_minutes'])))
+                : $state->fill([
+                    'status' => EngineStatus::Degraded,
+                    'resume_after' => now()->addMinutes((int) $config['degraded_minutes']),
+                ])->save(),
+
+            PauseReason::ProviderOutage => $failures >= (int) $config['failure_threshold']
+                ? $this->pause($engine, $reason, $message, probeAt: now()->addMinutes($this->outagePauseMinutes($state)))
+                : null,
+
+            default => null,
+        };
+    }
+
+    /**
+     * 15, 30, 60… minutes, doubling for each outage pause in a row, up to the maximum.
+     */
+    protected function outagePauseMinutes(EngineState $state): int
+    {
+        $config = config('ai-visibility.reliability');
+        $previous = (int) ($state->last_error['outage_pauses'] ?? 0);
+
+        $state->forceFill(['last_error' => [...($state->last_error ?? []), 'outage_pauses' => $previous + 1]])->save();
+
+        return (int) min($config['outage_pause_minutes'] * (2 ** $previous), $config['outage_pause_max_minutes']);
+    }
+
+    /**
+     * Requests per minute allowed right now (halved while degraded by rate limits).
+     */
+    public function requestsPerMinute(string $engine): int
+    {
+        $rpm = max(1, (int) $this->settings->get('engines.requests_per_minute', 20));
+
+        return $this->state($engine)->status === EngineStatus::Degraded ? max(1, intdiv($rpm, 2)) : $rpm;
+    }
+
+    /**
+     * Paused engines whose automatic check is due (credits, outages, rate limits, budget).
+     *
+     * @return array<string>
+     */
+    public function dueForProbe(): array
+    {
+        return EngineState::query()
+            ->where('status', EngineStatus::Paused)
+            ->whereIn('reason', array_map(fn (PauseReason $reason) => $reason->value, [
+                PauseReason::InsufficientCredits, PauseReason::ProviderOutage, PauseReason::RateLimited, PauseReason::Budget,
+            ]))
+            ->where(fn ($query) => $query
+                ->where(fn ($q) => $q->whereNotNull('next_probe_at')->where('next_probe_at', '<=', now()))
+                ->orWhere(fn ($q) => $q->whereNotNull('resume_after')->where('resume_after', '<=', now()))
+                ->orWhere('reason', PauseReason::Budget->value))
+            ->pluck('engine')
+            ->all();
+    }
+
+    public function pause(string $engine, PauseReason $reason, ?string $message = null, mixed $probeAt = null, mixed $resumeAt = null): void
     {
         $state = $this->state($engine);
 
@@ -153,6 +255,8 @@ class EngineManager
             'reason' => $reason,
             'message' => $message ?? $reason->fix(),
             'paused_at' => $alreadyPaused ? $state->paused_at : now(),
+            'next_probe_at' => $probeAt,
+            'resume_after' => $resumeAt,
         ])->save();
 
         // One event per pause episode, not per failed request.

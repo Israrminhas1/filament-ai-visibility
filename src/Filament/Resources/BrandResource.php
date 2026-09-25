@@ -20,6 +20,7 @@ use Filament\Tables\Columns\ToggleColumn;
 use Filament\Tables\Table;
 use IsrarMinhas\FilamentAiVisibility\Engines\EngineRegistry;
 use IsrarMinhas\FilamentAiVisibility\Enums\RunFrequency;
+use IsrarMinhas\FilamentAiVisibility\Filament\Actions\RunNowAction;
 use IsrarMinhas\FilamentAiVisibility\Filament\Concerns\HasAiVisibilityNavigation;
 use IsrarMinhas\FilamentAiVisibility\Filament\Resources\BrandResource\Pages;
 use IsrarMinhas\FilamentAiVisibility\Filament\Resources\BrandResource\RelationManagers;
@@ -153,6 +154,7 @@ class BrandResource extends Resource
                 TextColumn::make('last_run_at')->label('Last run')->since()->placeholder('Never')->sortable(),
             ])
             ->recordActions([
+                RunNowAction::make(),
                 EditAction::make(),
                 DeleteAction::make(),
             ])

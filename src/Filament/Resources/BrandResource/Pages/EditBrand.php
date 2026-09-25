@@ -4,6 +4,7 @@ namespace IsrarMinhas\FilamentAiVisibility\Filament\Resources\BrandResource\Page
 
 use Filament\Actions\DeleteAction;
 use Filament\Resources\Pages\EditRecord;
+use IsrarMinhas\FilamentAiVisibility\Filament\Actions\RunNowAction;
 use IsrarMinhas\FilamentAiVisibility\Filament\Concerns\HandlesLimitExceptions;
 use IsrarMinhas\FilamentAiVisibility\Filament\Resources\BrandResource;
 use IsrarMinhas\FilamentAiVisibility\Filament\Resources\BrandResource\Pages\Concerns\CleansBrandSettings;
@@ -18,6 +19,7 @@ class EditBrand extends EditRecord
     protected function getHeaderActions(): array
     {
         return [
+            RunNowAction::make(fn () => $this->getRecord()),
             DeleteAction::make(),
         ];
     }
