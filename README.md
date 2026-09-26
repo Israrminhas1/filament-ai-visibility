@@ -2,7 +2,12 @@
 
 Track how your brand shows up in answers from ChatGPT, Claude, Gemini, Perplexity, Grok and Google's AI Overviews / AI Mode — with competitor intelligence, inside your own Filament panel. Bring your own API keys; one key is enough to start.
 
-> **Status: 1.0 release candidate.** Every planned feature is built and tested on Filament 4 and 5. See [`docs/SPEC.md`](docs/SPEC.md) for the design.
+> **Status: beta (`v1.0.0-beta.1`).** Every feature is built and covered by 550+ tests on Filament 4 and 5.
+>
+> - Checked against the real APIs: OpenAI and Claude (real-time answers), competitor discovery, and website fetching.
+> - Not yet run against the real APIs: Gemini, Grok, Perplexity, Google AI Overviews / AI Mode, and economy (batch) mode. These are covered only by tests with simulated responses, so treat them as beta.
+>
+> Please [open an issue](https://github.com/Israrminhas1/filament-ai-visibility/issues) if something doesn't work.
 
 ## Documentation
 

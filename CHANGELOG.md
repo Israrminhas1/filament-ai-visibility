@@ -1,6 +1,17 @@
 # Changelog
 
-## Unreleased — Review fixes before 1.0
+## v1.0.0-beta.1 — 2026-09-26
+
+First public beta. Everything below the "Unreleased" headings that follow is included in this release.
+
+Also in this release:
+
+- Separate queues per purpose (`AI_VISIBILITY_QUEUE_TRACKING`, `_ANALYSIS`, `_CLASSIFICATION`), with a worker check, waiting-job count and stopped-queue alert for each.
+- `AiVisibilityPlugin::registerEngine()`, `removeEngine()` and `registerKeywordSource()` for service providers, so custom engines and keyword sources work in queue workers and scheduled commands.
+- `ai-visibility:prune` removes the text of answers past "Keep full answer text for", keeping every metric.
+- Developer documentation in `docs/`.
+
+## Review fixes before 1.0
 
 An independent review of every module found about 30 issues; all blocking ones are fixed.
 
@@ -15,7 +26,7 @@ An independent review of every module found about 30 issues; all blocking ones a
 - Reports and alerts: "All brands" rules alert per brand, share of voice counts tracked brands only, "prompt lost" compares whole runs, calendar-month and full-week report periods, no double sends, dark-mode colours.
 - Keywords: Excel (BOM) and Windows-1252 CSVs import correctly, imports are all-or-nothing, generated prompts never contain the brand name unless branded prompts were asked for, SerpAPI seed loop fixed.
 
-## Unreleased — Milestone 8 (1.0)
+## Milestone 8 (1.0)
 
 - Google AI Overviews and Google AI Mode engines through SerpAPI, sharing one key (`AI_VISIBILITY_SERPAPI_KEY`). Separately loaded overviews are fetched automatically; searches without an AI answer are recorded, not failed. Key and quota problems pause the engines like any other.
 - Economy mode: scheduled runs on OpenAI and Claude use the batch APIs at about half the token cost. Failed, expired, rejected or overdue batch answers are retried in real time; account errors pause the engine. New `ai-visibility:poll-batches` command (every 5 minutes) and a waiting notice on the run page.
@@ -26,14 +37,14 @@ An independent review of every module found about 30 issues; all blocking ones a
 - Gemini 3 searches are counted and priced per query; Gemini 2.5 per prompt (`pricing.search_fee_models`).
 - A model that can't search the web or doesn't exist pauses its engine with that reason instead of failing every answer.
 
-## Unreleased — Milestone 7 (alerts and scheduled reports)
+## Milestone 7 (alerts and scheduled reports)
 
 - Alert rules: visibility drop, competitor overtakes, new direct competitor, prompt lost, negative sentiment, budget threshold, run failed. Per-rule channels and cooldown; one alert per episode.
 - Alerts inbox with unread badge; every alert (including always-on ones) is recorded.
 - Always-on stall alerts for a stopped queue worker (watchdog every 10 minutes) and a stopped scheduler (checked from the panel).
 - Scheduled weekly/monthly email reports with selectable sections, preview, send now, optional PDF (dompdf), failure alerts and retries.
 
-## Unreleased — Milestone 6 (keywords, generation, topics)
+## Milestone 6 (keywords, generation, topics)
 
 - Keyword sources: SerpAPI "People also ask", Google Search Console (service account) and DataForSEO, with tests, scheduled syncs, keyword limits, failure states and one-time alerts. Custom sources via `->keywordSource()`.
 - Keyword-grounded prompt generation with rule checks and optional AI quality review; suggestions saved for review, rejected ideas kept with reasons; prompts linked to their keywords.
@@ -42,7 +53,7 @@ An independent review of every module found about 30 issues; all blocking ones a
 - Search-weighted reach on the Overview.
 - Brand markets like "UK" now map to the correct country code (GB).
 
-## Unreleased — Milestone 5 (analysis and competitor reports)
+## Milestone 5 (analysis and competitor reports)
 
 - Answer analysis: sentiment (with score), recommendation strength and descriptors for every detected brand and competitor mention; also collects other company names, replacing the separate extraction call.
 - Deferred analysis when no helper engine is available, caught up automatically.
@@ -51,7 +62,7 @@ An independent review of every module found about 30 issues; all blocking ones a
 - Opportunities report: prompts where competitors are named without the brand, and the sites cited in those answers.
 - Brand perception on the Overview; analysis shown on each answer.
 
-## Unreleased — Milestone 4 (competitor intelligence)
+## Milestone 4 (competitor intelligence)
 
 - Helper AI calls (no web search) on every engine, with the same pausing, budgets and cost tracking as tracking; works with any single key.
 - Name extraction: companies and products mentioned in answers without a link.
@@ -63,7 +74,7 @@ An independent review of every module found about 30 issues; all blocking ones a
 - "Suggest competitors" in the setup wizard; editable AI instructions in Settings.
 - `ai-visibility:discover` command; discovery runs after each run and daily.
 
-## Unreleased — Milestone 3 (reports)
+## Milestone 3 (reports)
 
 - Overview dashboard with brand, period, engine and topic filters: visibility, share of voice, citation rate and average position with period-over-period change; visibility trend per engine; share of voice; visibility by engine; top sources; prompts gained, lost and least visible; banner when tracking is interrupted.
 - Sources report: source categories, top cited domains, and the brand's most-cited pages.
@@ -72,7 +83,7 @@ An independent review of every module found about 30 issues; all blocking ones a
 - 30-day visibility column on prompts.
 - CSV export of answers and prompts (spreadsheet-formula safe).
 
-## Unreleased — Milestone 2 (tracking engine)
+## Milestone 2 (tracking engine)
 
 - Tracking runs on OpenAI, Anthropic, Gemini, Grok and Perplexity with web search enabled, localised to the brand's market.
 - Mention detection (brand and competitors, positions, counts, snippets; ignores URLs, partial words and exclusion phrases) and source extraction with brand/competitor matching.
@@ -83,7 +94,7 @@ An independent review of every module found about 30 issues; all blocking ones a
 - Runs and Answers screens; answers shown with the brand and competitors highlighted.
 - `ai-visibility:run` and `ai-visibility:probe` commands, scheduled automatically.
 
-## Unreleased — Milestone 1 (foundation)
+## Milestone 1 (foundation)
 
 - Setup wizard (system checks, engines and key tests, budget with cost estimate, brand pre-filled from its website, competitors, keywords, prompts, alerts).
 - Engines: OpenAI, Anthropic, Gemini, Grok and Perplexity, with live key tests and automatic pausing when a key is missing, rejected, out of credits or the model is unavailable.
