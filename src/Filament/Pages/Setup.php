@@ -4,6 +4,7 @@ namespace IsrarMinhas\FilamentAiVisibility\Filament\Pages;
 
 use Filament\Actions\Action;
 use Filament\Forms\Components\Checkbox;
+use Filament\Forms\Components\Hidden;
 use Filament\Forms\Components\Repeater;
 use Filament\Forms\Components\Select;
 use Filament\Forms\Components\TagsInput;
@@ -24,7 +25,9 @@ use Filament\Schemas\Components\Wizard\Step;
 use Filament\Schemas\Schema;
 use Filament\Support\Exceptions\Halt;
 use Illuminate\Support\Facades\Blade;
+use Illuminate\Support\Collection;
 use Illuminate\Support\HtmlString;
+use Illuminate\Support\Str;
 use IsrarMinhas\FilamentAiVisibility\AiVisibilityPlugin;
 use IsrarMinhas\FilamentAiVisibility\Competitors\CompetitorSuggester;
 use IsrarMinhas\FilamentAiVisibility\Prompts\PromptGenerator;
@@ -32,6 +35,7 @@ use IsrarMinhas\FilamentAiVisibility\Exceptions\HelperUnavailable;
 use IsrarMinhas\FilamentAiVisibility\Engines\EngineManager;
 use IsrarMinhas\FilamentAiVisibility\Engines\EngineRegistry;
 use IsrarMinhas\FilamentAiVisibility\Enums\KeywordSource;
+use IsrarMinhas\FilamentAiVisibility\Enums\PromptStatus;
 use IsrarMinhas\FilamentAiVisibility\Enums\RunFrequency;
 use IsrarMinhas\FilamentAiVisibility\Exceptions\LimitExceeded;
 use IsrarMinhas\FilamentAiVisibility\Filament\Concerns\HasAiVisibilityNavigation;
@@ -42,6 +46,7 @@ use IsrarMinhas\FilamentAiVisibility\Support\CostEstimator;
 use IsrarMinhas\FilamentAiVisibility\Support\Health\SystemHealth;
 use IsrarMinhas\FilamentAiVisibility\Support\Importer;
 use IsrarMinhas\FilamentAiVisibility\Support\Limits;
+use IsrarMinhas\FilamentAiVisibility\Support\Text as TextHelper;
 use IsrarMinhas\FilamentAiVisibility\Support\Settings;
 use IsrarMinhas\FilamentAiVisibility\Support\WebsiteProfile;
 
@@ -123,7 +128,7 @@ class Setup extends Page
                 'domain' => $competitor->domains[0] ?? null,
             ])->all() : [],
             'keywords_text' => null,
-            'prompts_text' => null,
+            'prompts' => $this->promptRows($brand),
         ]);
     }
 
@@ -532,9 +537,16 @@ class Setup extends Page
         }
 
         $good = $result['candidates']->where('passed', true)->pluck('text');
-        $lines = collect(Importer::lines($get('prompts_text')))->merge($good)->unique()->implode("\n");
+        $rows = collect($get('prompts') ?? [])->filter(fn ($row) => filled($row['text'] ?? null));
+        $have = $rows->map(fn ($row) => TextHelper::hash($row['text']))->flip();
 
-        $set('prompts_text', $lines);
+        foreach ($good as $text) {
+            if (! $have->has(TextHelper::hash($text))) {
+                $rows->put((string) Str::uuid(), ['id' => null, 'text' => $text]);
+            }
+        }
+
+        $set('prompts', $rows->all());
 
         Notification::make()
             ->title("Added {$good->count()} questions")
@@ -549,7 +561,7 @@ class Setup extends Page
             ->icon('heroicon-o-chat-bubble-left-right')
             ->description('Questions to track')
             ->schema([
-                Text::make(fn () => 'Write the questions your customers ask AI assistants, one per line. Don\'t include your brand name. ' . $this->promptCountText()),
+                Text::make('Add the questions your customers ask AI assistants, one per row. Don\'t include your brand name.'),
                 Actions::make([
                     Action::make('generatePrompts')
                         ->label('Generate with AI')
@@ -557,19 +569,25 @@ class Setup extends Page
                         ->color('gray')
                         ->action(fn (Get $get, Set $set) => $this->generatePrompts($get, $set)),
                 ])->key('promptActions'),
-                Textarea::make('prompts_text')
+                Repeater::make('prompts')
                     ->hiddenLabel()
-                    ->rows(10)
-                    ->placeholder("What is the best CRM for a small marketing agency?\nWhich CRM integrates with Gmail and Slack?\nWhat are good alternatives to HubSpot?"),
+                    ->defaultItems(1)
+                    ->reorderable(false)
+                    ->addActionLabel('Add question')
+                    ->schema([
+                        Hidden::make('id'),
+                        TextInput::make('text')
+                            ->hiddenLabel()
+                            ->maxLength(2000)
+                            ->placeholder('e.g. What is the best CRM for a small marketing agency?'),
+                    ]),
             ])
             ->afterValidation(function (Get $get, Set $set) {
                 $brand = $this->brand();
-                $lines = Importer::lines($get('prompts_text'));
+                $result = $this->savePrompts($brand, collect($get('prompts') ?? []));
+                $set('prompts', $this->promptRows($brand));
 
-                if ($lines !== []) {
-                    $result = app(Importer::class)->prompts($brand, $lines);
-                    $set('prompts_text', null);
-
+                if ($result['created'] > 0) {
                     Notification::make()
                         ->title("Added {$result['created']} prompts")
                         ->body($result['paused'] > 0 ? "{$result['paused']} were saved as paused because of the active-prompt limit." : null)
@@ -577,7 +595,7 @@ class Setup extends Page
                         ->send();
                 }
 
-                if ($brand->prompts()->count() === 0) {
+                if ($brand->activePrompts()->count() === 0) {
                     $this->fail('Add at least one prompt', 'Tracking needs at least one question to ask the AI engines.');
                 }
 
@@ -585,17 +603,60 @@ class Setup extends Page
             });
     }
 
-    protected function promptCountText(): string
+    /**
+     * The brand's active prompts as rows, or one empty row to start with.
+     *
+     * @return array<int, array{id: ?int, text: ?string}>
+     */
+    protected function promptRows(?Brand $brand): array
     {
-        $brand = Brand::query()->find($this->data['brand']['id'] ?? null);
+        $rows = $brand
+            ? $brand->activePrompts()->orderBy('id')->get(['id', 'text'])->map(fn ($prompt) => ['id' => $prompt->getKey(), 'text' => $prompt->text])->all()
+            : [];
 
-        if (! $brand) {
-            return '';
+        return $rows ?: [['id' => null, 'text' => null]];
+    }
+
+    /**
+     * Sync the rows with the brand's active prompts. Changed or removed prompts
+     * that already have answers are paused rather than edited or deleted, so
+     * their history stays intact.
+     *
+     * @param  Collection<array-key, array{id?: ?int, text?: ?string}>  $rows
+     * @return array{created: int, paused: int}
+     */
+    protected function savePrompts(Brand $brand, Collection $rows): array
+    {
+        $keep = [];
+        $new = [];
+
+        foreach ($rows as $row) {
+            $text = TextHelper::squish((string) ($row['text'] ?? ''));
+            $prompt = filled($row['id'] ?? null) ? $brand->prompts()->find($row['id']) : null;
+
+            if ($text === '') {
+                continue;
+            }
+
+            if ($prompt && TextHelper::hash($prompt->text) === TextHelper::hash($text)) {
+                $keep[] = $prompt->getKey();
+            } elseif ($prompt && ! $prompt->results()->exists()) {
+                $prompt->update(['text' => $text]);
+                $keep[] = $prompt->getKey();
+            } else {
+                $new[] = $text;
+            }
         }
 
-        $count = $brand->activePrompts()->count();
+        foreach ($brand->activePrompts()->whereKeyNot($keep)->get() as $removed) {
+            $removed->results()->exists()
+                ? $removed->update(['status' => PromptStatus::Paused])
+                : $removed->delete();
+        }
 
-        return $count > 0 ? "{$brand->name} already has {$count} active prompts." : '';
+        $result = $new === [] ? ['created' => 0, 'paused' => 0] : app(Importer::class)->prompts($brand, $new);
+
+        return ['created' => $result['created'], 'paused' => $result['paused']];
     }
 
     protected function alertsStep(): Step

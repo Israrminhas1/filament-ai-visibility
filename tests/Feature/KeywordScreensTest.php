@@ -142,8 +142,38 @@ describe('generation screens', function () {
             ->callAction(TestAction::make('generatePrompts')->schemaComponent('promptActions', schema: 'form'))
             ->assertNotified('Added 1 questions');
 
-        expect($component->get('data.prompts_text'))->toBe('Which CRM integrates best with Slack?')
+        // Added as rows below what was already typed, without saving anything yet.
+        expect(collect($component->get('data.prompts'))->pluck('text')->filter()->values()->all())->toBe(['Which CRM integrates best with Slack?'])
             ->and(Prompt::query()->count())->toBe(0);
+    });
+
+    it('edits the brand\'s questions as rows in the setup wizard, keeping answered ones', function () {
+        app(Settings::class)->record()->forceFill(['setup_completed_at' => null, 'setup_step' => 7])->save();
+        $answered = $this->brand->prompts()->create(['text' => 'Best CRM for agencies?']);
+        $unanswered = $this->brand->prompts()->create(['text' => 'Cheapest CRM?']);
+        $removed = $this->brand->prompts()->create(['text' => 'CRM with invoicing?']);
+        $run = \IsrarMinhas\FilamentAiVisibility\Models\Run::query()->create(['brand_id' => $this->brand->id, 'results_total' => 1]);
+        \IsrarMinhas\FilamentAiVisibility\Models\Result::query()->create(['run_id' => $run->id, 'brand_id' => $this->brand->id, 'prompt_id' => $answered->id, 'engine' => 'openai', 'model' => 'gpt-6-luna']);
+
+        $component = livewire(Setup::class);
+
+        expect(collect($component->get('data.prompts'))->pluck('text')->all())
+            ->toBe(['Best CRM for agencies?', 'Cheapest CRM?', 'CRM with invoicing?']);
+
+        $component
+            ->fillForm(['prompts' => [
+                ['id' => $answered->id, 'text' => 'Best CRM for design agencies?'],
+                ['id' => $unanswered->id, 'text' => 'Cheapest CRM for startups?'],
+                ['id' => null, 'text' => 'Which CRM works with Slack?'],
+            ]])
+            ->goToWizardStep(8);
+
+        // Answered prompts keep their history: paused, with the new wording added as a new prompt.
+        expect($answered->fresh()->status)->toBe(PromptStatus::Paused)
+            ->and($unanswered->fresh()->text)->toBe('Cheapest CRM for startups?')
+            ->and(Prompt::query()->find($removed->id))->toBeNull()
+            ->and($this->brand->activePrompts()->orderBy('id')->pluck('text')->all())
+            ->toBe(['Cheapest CRM for startups?', 'Best CRM for design agencies?', 'Which CRM works with Slack?']);
     });
 });
 

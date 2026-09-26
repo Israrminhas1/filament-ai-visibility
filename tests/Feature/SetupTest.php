@@ -96,7 +96,7 @@ it('runs the whole wizard with a single OpenAI key', function () {
         // Prompts: at least one is required.
         ->goToWizardStep(8)
         ->assertNotified('Add at least one prompt')
-        ->fillForm(['prompts_text' => "What is the best CRM for agencies?\nWhich CRM works with Slack?"])
+        ->fillForm(['prompts' => [['id' => null, 'text' => 'What is the best CRM for agencies?'], ['id' => null, 'text' => 'Which CRM works with Slack?'], ['id' => null, 'text' => '  ']]])
         ->goToWizardStep(8)
         // Alerts.
         ->fillForm(['alerts' => ['emails' => ['ops@example.com'], 'slack_webhook' => null]])
