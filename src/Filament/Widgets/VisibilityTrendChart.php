@@ -27,11 +27,13 @@ class VisibilityTrendChart extends ChartWidget
         'gemini' => '#3b82f6',
         'grok' => '#111827',
         'perplexity' => '#14b8a6',
+        'google_ai_overview' => '#8b5cf6',
+        'google_ai_mode' => '#ec4899',
     ];
 
     public function getDescription(): ?string
     {
-        return '% of answers mentioning the brand, per engine. Gaps are days without answers (e.g. a paused engine).';
+        return '% of answers mentioning the brand, per engine, on each day with a run. A gap means that engine had no answers that day (e.g. it was paused).';
     }
 
     protected function getData(): array
@@ -44,9 +46,20 @@ class VisibilityTrendChart extends ChartWidget
 
         $trend = $this->metrics()->trend($filters);
 
+        // Only days with answers are plotted, so weekly runs draw a line rather than
+        // scattered dots. A day one engine missed (e.g. while paused) still shows a gap.
+        $days = array_keys(array_filter(
+            $trend['labels'],
+            fn ($day, $index) => collect($trend['series'])->contains(fn (array $values) => ($values[$index] ?? null) !== null),
+            ARRAY_FILTER_USE_BOTH,
+        ));
+
+        $labels = array_map(fn ($index) => $trend['labels'][$index], $days);
+        $series = collect($trend['series'])->map(fn (array $values) => array_map(fn ($index) => $values[$index] ?? null, $days));
+
         return [
-            'labels' => array_map(fn ($day) => CarbonImmutable::parse($day)->format('M j'), $trend['labels']),
-            'datasets' => collect($trend['series'])->map(fn (array $values, string $engine) => [
+            'labels' => array_map(fn ($day) => CarbonImmutable::parse($day)->format('M j'), $labels),
+            'datasets' => $series->map(fn (array $values, string $engine) => [
                 'label' => ResultResource::engineLabel($engine),
                 'data' => $values,
                 'borderColor' => static::ENGINE_COLORS[$engine] ?? '#6b7280',

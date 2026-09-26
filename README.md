@@ -1,6 +1,16 @@
 # Filament AI Visibility
 
+![Filament AI Visibility](https://raw.githubusercontent.com/Israrminhas1/filament-ai-visibility/main/art/thumbnail.png)
+
 Track how your brand shows up in answers from ChatGPT, Claude, Gemini, Perplexity, Grok and Google's AI Overviews / AI Mode — with competitor intelligence, inside your own Filament panel. Bring your own API keys; one key is enough to start.
+
+| Overview | Competitors |
+|---|---|
+| ![Overview](https://raw.githubusercontent.com/Israrminhas1/filament-ai-visibility/main/art/screenshot-01-overview.png) | ![Competitors](https://raw.githubusercontent.com/Israrminhas1/filament-ai-visibility/main/art/screenshot-02-competitors.png) |
+| **An answer, analysed** | **Discovered competitors** |
+| ![Answer](https://raw.githubusercontent.com/Israrminhas1/filament-ai-visibility/main/art/screenshot-10-answer.png) | ![Discovered](https://raw.githubusercontent.com/Israrminhas1/filament-ai-visibility/main/art/screenshot-06-discovered.png) |
+
+<sub>Screenshots use fictional sample data.</sub>
 
 > **Status: beta (`v1.0.0-beta.1`).** Every feature is built and covered by 550+ tests on Filament 4 and 5.
 >

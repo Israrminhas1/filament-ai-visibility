@@ -1,0 +1,8 @@
+# Kept in the repository, left out of the Composer package.
+/.github            export-ignore
+/art                export-ignore
+/tests              export-ignore
+/.gitattributes     export-ignore
+/.gitignore         export-ignore
+/phpunit.xml.dist   export-ignore
+/docs/SPEC.md       export-ignore
