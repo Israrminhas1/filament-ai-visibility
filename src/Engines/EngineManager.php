@@ -59,7 +59,10 @@ class EngineManager
     public function isUsable(string $engine): bool
     {
         if (! $this->keys->has($engine)) {
-            $this->pause($engine, PauseReason::MissingKey);
+            // A manual or budget pause is kept, so adding a key later does not lift it.
+            if (! $this->waitsForPerson($this->state($engine))) {
+                $this->pause($engine, PauseReason::MissingKey);
+            }
 
             return false;
         }
@@ -104,6 +107,15 @@ class EngineManager
         return $create();
     }
 
+    /**
+     * The engine's state without creating it, for display paths. Null means
+     * the engine has never been used (and so counts as active).
+     */
+    public function existingState(string $engine): ?EngineState
+    {
+        return $this->findState($engine);
+    }
+
     protected function findState(string $engine): ?EngineState
     {
         // The oldest row wins, should a duplicate ever exist.
@@ -127,6 +139,14 @@ class EngineManager
             ->unique()
             ->values()
             ->all();
+    }
+
+    /**
+     * Whether a --tenant option names a tenant this install knows about.
+     */
+    public function isKnownTenant(int | string $tenantId): bool
+    {
+        return in_array((string) $tenantId, array_map('strval', $this->tenantIds()), true);
     }
 
     /**
@@ -271,8 +291,13 @@ class EngineManager
     public function recordFailure(string $engine, ?PauseReason $reason, ?string $message = null, ?int $retryAfter = null): void
     {
         $state = $this->state($engine);
-        $failures = $state->consecutive_failures + 1;
         $config = config('ai-visibility.reliability');
+        $previousReason = $state->last_error['reason'] ?? null;
+
+        // Failures are counted per reason: a 429 after two timeouts is the first rate limit.
+        $failures = $state->consecutive_failures > 0 && $previousReason === $reason?->value
+            ? $state->consecutive_failures + 1
+            : 1;
 
         $state->fill([
             'consecutive_failures' => $failures,
@@ -285,24 +310,48 @@ class EngineManager
             ], fn ($value) => $value !== null),
         ])->save();
 
+        // A pause that waits for a person (manual, budget, key, model) is never
+        // replaced by one that ends on its own: late results from in-flight jobs
+        // or batches would otherwise let the probe resume it.
+        if ($this->waitsForPerson($state)) {
+            return;
+        }
+
+        $pausedFor = fn (PauseReason $pause): bool => $state->status === EngineStatus::Paused && $state->reason === $pause;
+
         match ($reason) {
             PauseReason::InvalidKey, PauseReason::MissingKey, PauseReason::ModelUnavailable => $this->pause($engine, $reason, $message),
 
-            PauseReason::InsufficientCredits => $this->pause($engine, $reason, $message, probeAt: now()->addMinutes((int) $config['credits_probe_minutes'])),
+            PauseReason::InsufficientCredits => $this->pause($engine, $reason, $message, probeAt: $pausedFor($reason) && $state->next_probe_at?->isFuture()
+                ? $state->next_probe_at
+                : now()->addMinutes((int) $config['credits_probe_minutes'])),
 
-            PauseReason::RateLimited => $failures >= (int) $config['rate_limit_threshold']
-                ? $this->pause($engine, $reason, $message, resumeAt: now()->addSeconds(max($retryAfter ?? 0, 60 * (int) $config['degraded_minutes'])))
-                : $state->fill([
+            PauseReason::RateLimited => match (true) {
+                $failures >= (int) $config['rate_limit_threshold'] => $this->pause($engine, $reason, $message, resumeAt: now()->addSeconds(max($retryAfter ?? 0, 60 * (int) $config['degraded_minutes']))),
+                // Slowing down never lifts a pause.
+                $state->status === EngineStatus::Paused => null,
+                default => $state->fill([
                     'status' => EngineStatus::Degraded,
                     'resume_after' => now()->addMinutes((int) $config['degraded_minutes']),
                 ])->save(),
+            },
 
-            PauseReason::ProviderOutage => $failures >= (int) $config['failure_threshold']
+            // One outage is one pause: further failures while paused for it (in-flight
+            // requests, late batch results) do not grow the back-off again.
+            PauseReason::ProviderOutage => $failures >= (int) $config['failure_threshold'] && ! $pausedFor($reason)
                 ? $this->pause($engine, $reason, $message, probeAt: now()->addMinutes($this->outagePauseMinutes($state)))
                 : null,
 
             default => null,
         };
+    }
+
+    /**
+     * Paused for a reason that does not end on its own (manual, budget, key, model).
+     */
+    protected function waitsForPerson(EngineState $state): bool
+    {
+        return $state->status === EngineStatus::Paused && $state->reason !== null && ! $state->reason->resumesAutomatically();
     }
 
     /**

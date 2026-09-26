@@ -13,6 +13,14 @@ use Throwable;
  */
 class KeyResolver
 {
+    /**
+     * Stored keys already reported as undecryptable in this process, so the
+     * warning is logged once and not on every resolution.
+     *
+     * @var array<string, true>
+     */
+    protected static array $reported = [];
+
     public function __construct(
         protected EngineRegistry $engines,
     ) {}
@@ -68,6 +76,15 @@ class KeyResolver
         try {
             return $stored->api_key;
         } catch (Throwable $e) {
+            // A key saved again since (same row, new updated_at) is reported afresh.
+            $id = $stored->getKey() . ':' . $stored->updated_at?->getTimestamp();
+
+            if (isset(static::$reported[$id])) {
+                return null;
+            }
+
+            static::$reported[$id] = true;
+
             Log::warning("AI Visibility: the stored API key for [{$stored->engine}] could not be decrypted; add it again. " . $e->getMessage());
 
             return null;

@@ -25,6 +25,7 @@ use Filament\Schemas\Components\Wizard\Step;
 use Filament\Schemas\Schema;
 use Filament\Support\Exceptions\Halt;
 use Illuminate\Support\Facades\Blade;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Collection;
 use Illuminate\Support\HtmlString;
 use Illuminate\Support\Str;
@@ -65,6 +66,14 @@ class Setup extends Page
      * Start from the first step ("Run setup again" in Settings).
      */
     public bool $restart = false;
+
+    /**
+     * Prompts from the Prompts step that were saved as paused because of the
+     * active-prompt limit, so they stay listed (with a note) instead of vanishing.
+     *
+     * @var array<int>
+     */
+    public array $pausedPromptIds = [];
 
     public static function getSlug(?\Filament\Panel $panel = null): string
     {
@@ -552,7 +561,16 @@ class Setup extends Page
                         $this->fail('Keyword limit reached', $e->getMessage());
                     }
 
-                    Notification::make()->title("Added {$result['created']} keywords")->success()->send();
+                    $overLimit = $result['over_limit'] ?? 0;
+
+                    Notification::make()
+                        ->title("Added {$result['created']} keywords")
+                        ->body(collect([
+                            $overLimit ? "Only the first {$result['created']} new keywords were added because of the keyword limit; {$overLimit} were left out." : null,
+                            ($result['too_long'] ?? 0) ? "{$result['too_long']} keywords longer than 255 characters were skipped." : null,
+                        ])->filter()->implode(' ') ?: null)
+                        ->status($overLimit || ($result['too_long'] ?? 0) ? 'warning' : 'success')
+                        ->send();
                     $set('keywords_text', null);
                 }
 
@@ -578,17 +596,20 @@ class Setup extends Page
         $good = $result['candidates']->where('passed', true)->pluck('text');
         $rows = collect($get('prompts') ?? [])->filter(fn ($row) => filled($row['text'] ?? null));
         $have = $rows->map(fn ($row) => TextHelper::hash($row['text']))->flip();
+        $added = 0;
 
         foreach ($good as $text) {
-            if (! $have->has(TextHelper::hash($text))) {
-                $rows->put((string) Str::uuid(), ['id' => null, 'text' => $text]);
+            if (! $have->has($hash = TextHelper::hash($text))) {
+                $rows->put((string) Str::uuid(), ['id' => null, 'text' => $text, 'paused' => false]);
+                $have->put($hash, true);
+                $added++;
             }
         }
 
         $set('prompts', $rows->all());
 
         Notification::make()
-            ->title("Added {$good->count()} questions")
+            ->title($added ? "Added {$added} questions" : 'No new questions')
             ->body('Edit or delete any you don\'t want, then continue.' . ($result['candidates']->where('passed', false)->count() ? ' Weak ideas were left out.' : ''))
             ->success()
             ->send();
@@ -615,10 +636,12 @@ class Setup extends Page
                     ->addActionLabel('Add question')
                     ->schema([
                         Hidden::make('id'),
+                        Hidden::make('paused'),
                         TextInput::make('text')
                             ->hiddenLabel()
                             ->maxLength(2000)
-                            ->placeholder('e.g. What is the best CRM for a small marketing agency?'),
+                            ->placeholder('e.g. What is the best CRM for a small marketing agency?')
+                            ->helperText(fn (Get $get) => $get('paused') ? 'Saved as paused because of the active-prompt limit. Remove another question or raise the limit to track it.' : null),
                     ]),
             ])
             ->afterValidation(function (Get $get, Set $set) {
@@ -626,11 +649,15 @@ class Setup extends Page
                 $result = $this->savePrompts($brand, collect($get('prompts') ?? []));
                 $set('prompts', $this->promptRows($brand));
 
-                if ($result['created'] > 0) {
+                if ($result['created'] > 0 || $result['reactivated'] > 0 || $result['paused'] > 0) {
                     Notification::make()
-                        ->title("Added {$result['created']} prompts")
-                        ->body($result['paused'] > 0 ? "{$result['paused']} were saved as paused because of the active-prompt limit." : null)
-                        ->success()
+                        ->title($result['created'] > 0 ? "Added {$result['created']} prompts" : 'Prompts saved')
+                        ->body(collect([
+                            $result['reactivated'] ? "{$result['reactivated']} earlier prompts were turned back on." : null,
+                            $result['paused'] ? "{$result['paused']} were saved as paused because of the active-prompt limit. They are still listed; remove others or raise the limit to track them." : null,
+                            $result['merged'] ? "{$result['merged']} duplicate rows were merged." : null,
+                        ])->filter()->implode(' ') ?: null)
+                        ->status($result['paused'] > 0 ? 'warning' : 'success')
                         ->send();
                 }
 
@@ -643,59 +670,156 @@ class Setup extends Page
     }
 
     /**
-     * The brand's active prompts as rows, or one empty row to start with.
+     * The brand's active prompts as rows, plus any this step saved as paused
+     * because of the active-prompt limit, or one empty row to start with.
      *
-     * @return array<int, array{id: ?int, text: ?string}>
+     * @return array<int, array{id: ?int, text: ?string, paused: bool}>
      */
     protected function promptRows(?Brand $brand): array
     {
         $rows = $brand
-            ? $brand->activePrompts()->orderBy('id')->get(['id', 'text'])->map(fn ($prompt) => ['id' => $prompt->getKey(), 'text' => $prompt->text])->all()
+            ? $brand->prompts()
+                ->where(fn ($query) => $query->where('status', PromptStatus::Active)->orWhereKey($this->pausedPromptIds))
+                ->orderBy('id')
+                ->get(['id', 'text', 'status'])
+                ->map(fn ($prompt) => ['id' => $prompt->getKey(), 'text' => $prompt->text, 'paused' => $prompt->status !== PromptStatus::Active])
+                ->all()
             : [];
 
-        return $rows ?: [['id' => null, 'text' => null]];
+        return $rows ?: [['id' => null, 'text' => null, 'paused' => false]];
     }
 
     /**
-     * Sync the rows with the brand's active prompts. Changed or removed prompts
-     * that already have answers are paused rather than edited or deleted, so
-     * their history stays intact.
+     * Sync the rows with the brand's prompts, all in one transaction.
+     *
+     * - Duplicate rows are merged (the first one wins).
+     * - A row whose text matches a stored prompt, whatever its status, keeps
+     *   that prompt (turning it back on), so retyped, swapped or repeated
+     *   texts never collide.
+     * - Other edited rows update their own prompt, unless it already has
+     *   answers: then it is paused and a new prompt is added, so its history
+     *   stays intact.
+     * - Listed prompts that were removed are paused (with answers) or deleted.
+     * - Prompts over the active-prompt limit are saved as paused and stay listed.
      *
      * @param  Collection<array-key, array{id?: ?int, text?: ?string}>  $rows
-     * @return array{created: int, paused: int}
+     * @return array{created: int, reactivated: int, paused: int, merged: int}
      */
     protected function savePrompts(Brand $brand, Collection $rows): array
     {
-        $keep = [];
-        $new = [];
+        return DB::transaction(function () use ($brand, $rows) {
+            $prompts = $brand->prompts()->get();
+            $byId = $prompts->keyBy(fn ($prompt) => $prompt->getKey());
+            $byHash = $prompts->keyBy('text_hash');
+            $listed = $byId->filter(fn ($prompt) => $prompt->status === PromptStatus::Active || in_array($prompt->getKey(), $this->pausedPromptIds))->keys();
 
-        foreach ($rows as $row) {
-            $text = TextHelper::squish((string) ($row['text'] ?? ''));
-            $prompt = filled($row['id'] ?? null) ? $brand->prompts()->find($row['id']) : null;
+            $unique = [];
+            $merged = 0;
 
-            if ($text === '') {
-                continue;
+            foreach ($rows as $row) {
+                $text = TextHelper::squish((string) ($row['text'] ?? ''));
+
+                if ($text === '') {
+                    continue;
+                }
+
+                $hash = TextHelper::hash($text);
+
+                if (isset($unique[$hash])) {
+                    $merged++;
+
+                    continue;
+                }
+
+                $unique[$hash] = ['text' => $text, 'prompt' => $byId->get((int) ($row['id'] ?? 0))];
             }
 
-            if ($prompt && TextHelper::hash($prompt->text) === TextHelper::hash($text)) {
-                $keep[] = $prompt->getKey();
-            } elseif ($prompt && ! $prompt->results()->exists()) {
-                $prompt->update(['text' => $text]);
-                $keep[] = $prompt->getKey();
-            } else {
-                $new[] = $text;
+            // Final prompt per row: rows matching a stored text claim that prompt first...
+            $plan = [];
+            $claimed = [];
+
+            foreach ($unique as $hash => $row) {
+                if ($existing = $byHash->get($hash)) {
+                    $plan[$hash] = $existing;
+                    $claimed[$existing->getKey()] = true;
+                }
             }
-        }
 
-        foreach ($brand->activePrompts()->whereKeyNot($keep)->get() as $removed) {
-            $removed->results()->exists()
-                ? $removed->update(['status' => PromptStatus::Paused])
-                : $removed->delete();
-        }
+            // ...then edited rows take over their own prompt if it is free and unanswered.
+            $rewrite = [];
 
-        $result = $new === [] ? ['created' => 0, 'paused' => 0] : app(Importer::class)->prompts($brand, $new);
+            foreach ($unique as $hash => $row) {
+                if (array_key_exists($hash, $plan)) {
+                    continue;
+                }
 
-        return ['created' => $result['created'], 'paused' => $result['paused']];
+                $prompt = $row['prompt'];
+
+                if ($prompt && ! isset($claimed[$prompt->getKey()]) && ! $prompt->results()->exists()) {
+                    $claimed[$prompt->getKey()] = true;
+                    $rewrite[$hash] = $row['text'];
+                    $plan[$hash] = $prompt;
+                } else {
+                    $plan[$hash] = null;
+                }
+            }
+
+            // Removed first, so their slots count towards the active-prompt limit.
+            foreach ($listed as $id) {
+                if (isset($claimed[$id])) {
+                    continue;
+                }
+
+                $removed = $byId->get($id);
+
+                if (! $removed->results()->exists()) {
+                    $removed->delete();
+                } elseif ($removed->status === PromptStatus::Active) {
+                    $removed->update(['status' => PromptStatus::Paused]);
+                }
+            }
+
+            $remaining = app(Limits::class)->remainingActivePrompts($brand);
+            $created = 0;
+            $reactivated = 0;
+            $paused = [];
+
+            foreach ($plan as $hash => $prompt) {
+                $needsSlot = ! $prompt || $prompt->status !== PromptStatus::Active;
+                $fits = ! $needsSlot || $remaining === null || $remaining > 0;
+
+                if ($needsSlot && $fits && $remaining !== null) {
+                    $remaining--;
+                }
+
+                if (! $prompt) {
+                    $prompt = $brand->prompts()->create([
+                        'text' => $unique[$hash]['text'],
+                        'status' => $fits ? PromptStatus::Active : PromptStatus::Paused,
+                    ]);
+                    $created++;
+                } else {
+                    if (isset($rewrite[$hash])) {
+                        $prompt->text = $rewrite[$hash];
+                    }
+
+                    if ($needsSlot && $fits) {
+                        $prompt->status = PromptStatus::Active;
+                        $reactivated++;
+                    }
+
+                    $prompt->save();
+                }
+
+                if ($prompt->status !== PromptStatus::Active) {
+                    $paused[] = $prompt->getKey();
+                }
+            }
+
+            $this->pausedPromptIds = $paused;
+
+            return ['created' => $created, 'reactivated' => $reactivated, 'paused' => count($paused), 'merged' => $merged];
+        });
     }
 
     protected function alertsStep(): Step

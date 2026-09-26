@@ -14,7 +14,8 @@ use IsrarMinhas\FilamentAiVisibility\Support\Tenancy;
 
 /**
  * Re-checks a brand's stored answers after its names, domains or
- * competitors change. Several edits in a row queue only one job.
+ * competitors change. Several edits in a row queue only one job. Large
+ * brands are done a chunk at a time, each chunk queueing the next.
  */
 class RedetectBrandJob implements ShouldBeUniqueUntilProcessing, ShouldQueue
 {
@@ -26,9 +27,15 @@ class RedetectBrandJob implements ShouldBeUniqueUntilProcessing, ShouldQueue
 
     public int $timeout = 900;
 
+    /**
+     * Answers re-checked per job.
+     */
+    public const CHUNK = 250;
+
     public function __construct(
         public readonly int $brandId,
         public readonly int | string | null $tenantId,
+        public readonly int $afterId = 0,
     ) {
         $this->onConnection(SystemHealth::queueConnection());
         $this->onQueue(config('ai-visibility.queues.classification', 'default'));
@@ -36,7 +43,8 @@ class RedetectBrandJob implements ShouldBeUniqueUntilProcessing, ShouldQueue
 
     public function uniqueId(): string
     {
-        return "{$this->tenantId}:{$this->brandId}";
+        // A new edit starts again from the first answer, even while a continuation is queued.
+        return "{$this->tenantId}:{$this->brandId}:{$this->afterId}";
     }
 
     public function handle(): void
@@ -44,8 +52,14 @@ class RedetectBrandJob implements ShouldBeUniqueUntilProcessing, ShouldQueue
         Tenancy::as($this->tenantId, function () {
             $brand = Brand::query()->find($this->brandId);
 
-            if ($brand) {
-                app(Redetector::class)->brand($brand);
+            if (! $brand) {
+                return;
+            }
+
+            [, $lastId] = app(Redetector::class)->chunk($brand, $this->afterId, static::CHUNK);
+
+            if ($lastId !== null) {
+                static::dispatch($this->brandId, $this->tenantId, $lastId);
             }
         });
     }

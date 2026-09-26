@@ -148,23 +148,36 @@ describe('budget and alerts', function () {
         $engines = app(EngineManager::class);
 
         $engines->pause('openai', PauseReason::ProviderOutage);
-        $engines->resume('openai');
+        $engines->pause('openai', PauseReason::RateLimited);
+        // Back to an outage within the window: already reported.
         $engines->pause('openai', PauseReason::ProviderOutage);
-        $engines->resume('openai');
 
         expect(slackAlerts())->toHaveCount(2)
             ->and(slackAlerts()[0])->toContain('paused: Provider outage')
-            ->and(slackAlerts()[1])->toContain('resumed');
-
-        // Another reason is news.
-        $engines->pause('openai', PauseReason::InvalidKey);
-        expect(slackAlerts())->toHaveCount(3);
+            ->and(slackAlerts()[1])->toContain('paused: Rate limited');
 
         $this->travel(7)->hours();
+        $engines->pause('openai', PauseReason::RateLimited);
+        $engines->pause('openai', PauseReason::ProviderOutage);
+
+        expect(slackAlerts())->toHaveCount(4);
+    });
+
+    it('never leaves "resumed" as the last word on a paused engine', function () {
+        $engines = app(EngineManager::class);
+
+        $engines->pause('openai', PauseReason::ProviderOutage);
         $engines->resume('openai');
         $engines->pause('openai', PauseReason::ProviderOutage);
 
-        expect(slackAlerts())->toHaveCount(5);
+        expect(slackAlerts())->toHaveCount(3)
+            ->and(slackAlerts()[1])->toContain('resumed')
+            ->and(slackAlerts()[2])->toContain('paused: Provider outage');
+
+        // A resume nobody was told about stays silent.
+        $engines->resume('openai');
+        $engines->resume('openai');
+        expect(slackAlerts())->toHaveCount(4);
     });
 });
 
@@ -302,7 +315,7 @@ describe('state rows and tenants', function () {
             ->expectsOutputToContain('[tenant team-b] OpenAI (ChatGPT): paused')
             ->assertFailed();
 
-        expect(EngineState::query()->withoutGlobalScopes()->whereNull('tenant_id')->count())->toBe(0)
-            ->and(EngineState::query()->withoutGlobalScopes()->pluck('tenant_id')->sort()->values()->all())->toBe(['team-a', 'team-b']);
+        // A health check is read-only: no state rows, for any tenant.
+        expect(EngineState::query()->withoutGlobalScopes()->count())->toBe(0);
     });
 });

@@ -25,10 +25,17 @@ class RunProgress
     public const CLAIM_EXPIRES_AFTER = 300;
 
     /**
+     * Error for a result whose job ran out of retry time. A worker still answering
+     * it may record the answer over this (see finish()).
+     */
+    public const RETRY_WINDOW_EXPIRED = 'Not answered in time: the job ran out of retries.';
+
+    /**
      * Claim a pending result before asking the engine, so two workers never pay
      * for the same answer. Returns false when another worker has it or it is done.
+     * $expiresAfter should outlast the claiming job's timeout.
      */
-    public function claim(Result $result): bool
+    public function claim(Result $result, int $expiresAfter = self::CLAIM_EXPIRES_AFTER): bool
     {
         $claimed = Result::query()->withoutGlobalScopes()
             ->whereKey($result->getKey())
@@ -36,7 +43,7 @@ class RunProgress
                 ->where('status', ResultStatus::Pending)
                 ->orWhere(fn ($query) => $query
                     ->where('status', ResultStatus::Running)
-                    ->where('updated_at', '<', now()->subSeconds(self::CLAIM_EXPIRES_AFTER))))
+                    ->where('updated_at', '<', now()->subSeconds($expiresAfter))))
             ->update(['status' => ResultStatus::Running->value, 'updated_at' => now()]);
 
         if ($claimed) {
@@ -44,6 +51,22 @@ class RunProgress
         }
 
         return (bool) $claimed;
+    }
+
+    /**
+     * Seconds until the current claim on a result expires, or null when nobody holds a valid claim.
+     */
+    public function claimHeldFor(Result $result, int $expiresAfter = self::CLAIM_EXPIRES_AFTER): ?int
+    {
+        $row = Result::query()->withoutGlobalScopes()->whereKey($result->getKey())->first(['id', 'status', 'updated_at']);
+
+        if (! $row || $row->status !== ResultStatus::Running || ! $row->updated_at) {
+            return null;
+        }
+
+        $left = $expiresAfter - (now()->getTimestamp() - $row->updated_at->getTimestamp());
+
+        return $left > 0 ? $left : null;
     }
 
     /**
@@ -81,7 +104,16 @@ class RunProgress
             ->whereIn('status', [ResultStatus::Pending->value, ResultStatus::Running->value])
             ->update([...$attributes, 'status' => $status->value, 'updated_at' => now()]);
 
-        if (! $updated) {
+        // A paid answer that arrives after a duplicate job gave up on it is still recorded
+        // (ResultRecorder has already stored the answer and cleared the error).
+        $revived = ! $updated && $status === ResultStatus::Success && Result::query()->withoutGlobalScopes()
+            ->whereKey($result->getKey())
+            ->where('status', ResultStatus::Failed->value)
+            ->whereNotNull('answer')
+            ->where(fn ($query) => $query->whereNull('error')->orWhere('error', self::RETRY_WINDOW_EXPIRED))
+            ->update(['error' => null, ...$attributes, 'status' => $status->value, 'updated_at' => now()]);
+
+        if (! $updated && ! $revived) {
             return;
         }
 
@@ -99,6 +131,7 @@ class RunProgress
 
         Run::query()->withoutGlobalScopes()->whereKey($run->getKey())->update([
             $counter => DB::raw("{$counter} + 1"),
+            ...($revived ? ['results_failed' => DB::raw('CASE WHEN results_failed > 0 THEN results_failed - 1 ELSE 0 END')] : []),
             'cost_usd' => DB::raw('cost_usd + ' . $cost),
             'updated_at' => now(),
         ]);

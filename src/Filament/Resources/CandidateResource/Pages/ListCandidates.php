@@ -43,7 +43,15 @@ class ListCandidates extends ListRecords
                 $target = $brand ? $brand() : Brand::query()->findOrFail($data['brand_id']);
 
                 // Runs on the queue; one already waiting for this brand covers this request too.
-                DiscoverCompetitorsJob::dispatch($target->getKey(), $target->tenant_id);
+                if (! DiscoverCompetitorsJob::queueFor($target->getKey(), $target->tenant_id)) {
+                    Notification::make()
+                        ->title('Discovery is already queued for this brand')
+                        ->body('Results appear when it has run.')
+                        ->info()
+                        ->send();
+
+                    return;
+                }
 
                 Notification::make()
                     ->title('Discovery started in the background')

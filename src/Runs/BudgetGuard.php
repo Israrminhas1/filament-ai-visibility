@@ -80,9 +80,10 @@ class BudgetGuard
     {
         if (! $this->spend->overBudget()) {
             foreach (array_keys(app(EngineRegistry::class)->all()) as $engine) {
-                $state = $this->engines->state($engine);
+                // Read-only lookup: releasing the budget never creates engine state.
+                $state = $this->engines->existingState($engine);
 
-                if ($state->status === EngineStatus::Paused && $state->reason === PauseReason::Budget) {
+                if ($state?->status === EngineStatus::Paused && $state->reason === PauseReason::Budget) {
                     $this->engines->resume($engine);
                 }
             }

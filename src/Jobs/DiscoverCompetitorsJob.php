@@ -4,6 +4,9 @@ namespace IsrarMinhas\FilamentAiVisibility\Jobs;
 
 use DateTimeInterface;
 use Illuminate\Bus\Queueable;
+use Illuminate\Bus\UniqueLock;
+use Illuminate\Contracts\Bus\Dispatcher;
+use Illuminate\Contracts\Cache\Repository as Cache;
 use Illuminate\Contracts\Queue\ShouldBeUniqueUntilProcessing;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Bus\Dispatchable;
@@ -50,9 +53,45 @@ class DiscoverCompetitorsJob implements ShouldBeUniqueUntilProcessing, ShouldQue
         $this->onQueue(config('ai-visibility.queues.classification', 'default'));
     }
 
+    /**
+     * Queue discovery for a brand unless one is already waiting.
+     *
+     * @return bool Whether a job was queued.
+     */
+    public static function queueFor(int $brandId, int | string | null $tenantId, ?int $runId = null): bool
+    {
+        $job = new static($brandId, $tenantId, $runId);
+
+        if (! (new UniqueLock(app(Cache::class)))->acquire($job)) {
+            return false;
+        }
+
+        app(Dispatcher::class)->dispatch($job);
+
+        return true;
+    }
+
     public function uniqueId(): string
     {
         return "{$this->tenantId}:{$this->brandId}";
+    }
+
+    /**
+     * A job lost without running (a crashed worker, a flushed queue) stops
+     * blocking new ones after this many seconds.
+     */
+    public function uniqueFor(): int
+    {
+        return 3600;
+    }
+
+    /**
+     * The lock shared with ClassifyCandidatesJob, so the same candidates are
+     * never classified (and paid for) twice at the same time.
+     */
+    public static function overlapKey(int | string | null $tenantId, int $brandId): string
+    {
+        return "ai-visibility-discover:{$tenantId}:{$brandId}";
     }
 
     /**
@@ -61,7 +100,8 @@ class DiscoverCompetitorsJob implements ShouldBeUniqueUntilProcessing, ShouldQue
     public function middleware(): array
     {
         return [
-            (new WithoutOverlapping('ai-visibility-discover:' . $this->uniqueId()))
+            (new WithoutOverlapping(static::overlapKey($this->tenantId, $this->brandId)))
+                ->shared()
                 ->releaseAfter(60)
                 ->expireAfter($this->timeout + 60),
         ];

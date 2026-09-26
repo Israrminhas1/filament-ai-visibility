@@ -18,25 +18,27 @@ return new class extends Migration
             $table->unsignedTinyInteger('failures')->default(0)->after('last_error');
         });
 
-        // Alert rules look up the latest event per rule and brand.
+        // Alert rules look up the latest event per rule and brand. Both indexes get
+        // short names: generated ones would pass MySQL's 64-character limit with
+        // a longer table prefix.
         Schema::table($this->table('alert_events'), function (Blueprint $table) {
-            $table->index(['alert_rule_id', 'brand_id', 'id']);
+            $table->index(['alert_rule_id', 'brand_id', 'id'], 'aiv_alert_events_rule_brand_idx');
         });
 
         // Reports filter mentions by answer and subject (PostgreSQL doesn't index foreign keys itself).
         Schema::table($this->table('mentions'), function (Blueprint $table) {
-            $table->index(['result_id', 'subject_type', 'subject_id']);
+            $table->index(['result_id', 'subject_type', 'subject_id'], 'aiv_mentions_result_subject_idx');
         });
     }
 
     public function down(): void
     {
         Schema::table($this->table('mentions'), function (Blueprint $table) {
-            $table->dropIndex(['result_id', 'subject_type', 'subject_id']);
+            $table->dropIndex('aiv_mentions_result_subject_idx');
         });
 
         Schema::table($this->table('alert_events'), function (Blueprint $table) {
-            $table->dropIndex(['alert_rule_id', 'brand_id', 'id']);
+            $table->dropIndex('aiv_alert_events_rule_brand_idx');
         });
 
         Schema::table($this->table('report_schedules'), function (Blueprint $table) {

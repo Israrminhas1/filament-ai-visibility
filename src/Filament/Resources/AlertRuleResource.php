@@ -44,6 +44,11 @@ class AlertRuleResource extends Resource
         return 'Alert rules';
     }
 
+    public static function requiresSettingsAccess(): bool
+    {
+        return true;
+    }
+
     public static function getNavigationIcon(): ?string
     {
         return 'heroicon-o-bell';

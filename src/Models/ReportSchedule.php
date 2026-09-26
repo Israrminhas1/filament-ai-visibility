@@ -48,9 +48,11 @@ class ReportSchedule extends Model
                 $schedule->next_send_at = $schedule->nextSendAfter(now());
             }
 
-            // Turned back on (e.g. after being paused for failures): start counting again.
+            // Turned back on (e.g. after being paused for failures): start counting
+            // again, from the next regular send day rather than a time long past.
             if ($schedule->exists && $schedule->isDirty('is_active') && $schedule->is_active) {
                 $schedule->resetFailures();
+                $schedule->next_send_at = $schedule->nextSendAfter(now());
             }
         });
     }
@@ -87,10 +89,18 @@ class ReportSchedule extends Model
     }
 
     /**
-     * Mondays at 08:00 for weekly, the 1st at 08:00 for monthly.
+     * Mondays at 08:00 for weekly, the 1st at 08:00 for monthly. Earlier on
+     * the send day itself, that same day's 08:00.
      */
     public function nextSendAfter(CarbonInterface $from): CarbonInterface
     {
+        $today = $from->copy()->setTime(8, 0);
+        $sendDay = $this->frequency === 'monthly' ? $from->day === 1 : $from->isMonday();
+
+        if ($sendDay && $from->lt($today)) {
+            return $today;
+        }
+
         return $this->frequency === 'monthly'
             ? $from->copy()->addMonthNoOverflow()->startOfMonth()->setTime(8, 0)
             : $from->copy()->next(CarbonInterface::MONDAY)->setTime(8, 0);
@@ -105,12 +115,11 @@ class ReportSchedule extends Model
     }
 
     /**
-     * Failed sends since the last successful one.
+     * Failed scheduled sends since the last successful one. Not named after the
+     * failures column: Eloquent would treat a same-named method as a relation.
      */
-    public function failures(): int
+    public function failureCount(): int
     {
-        // Read the raw value: getAttribute() on an unloaded column would call this
-        // method again (Eloquent treats a same-named method as a relation).
         return static::hasFailuresColumn()
             ? (int) ($this->getAttributes()['failures'] ?? 0)
             : (int) Cache::get($this->failuresCacheKey(), 0);
@@ -122,7 +131,7 @@ class ReportSchedule extends Model
      */
     public function recordFailure(): int
     {
-        $count = $this->failures() + 1;
+        $count = $this->failureCount() + 1;
 
         static::hasFailuresColumn()
             ? $this->setAttribute('failures', $count)

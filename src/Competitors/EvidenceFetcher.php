@@ -5,10 +5,14 @@ namespace IsrarMinhas\FilamentAiVisibility\Competitors;
 use Closure;
 use DOMDocument;
 use DOMXPath;
+use GuzzleHttp\Psr7\Uri;
+use GuzzleHttp\Psr7\UriResolver;
 use Illuminate\Http\Client\Response;
 use Illuminate\Support\Facades\Http;
 use IsrarMinhas\FilamentAiVisibility\Models\DomainProfile;
 use IsrarMinhas\FilamentAiVisibility\Support\Text;
+use Psr\Http\Message\ResponseInterface;
+use RuntimeException;
 use Throwable;
 
 /**
@@ -99,66 +103,133 @@ class EvidenceFetcher
     public function fetch(string $url): ?string
     {
         for ($hop = 0; $hop <= self::MAX_REDIRECTS; $hop++) {
-            $ip = $this->safeAddress($url);
+            $url = $this->asciiUrl($url);
+            $ip = $url === null ? null : $this->safeAddress($url);
 
             if ($ip === null) {
                 return null;
             }
 
+            $sink = fopen('php://temp', 'w+b');
+            $meta = ['status' => null, 'type' => null, 'truncated' => false];
+
             try {
-                $response = $this->request($url, $ip);
-            } catch (Throwable) {
-                return null;
-            }
+                try {
+                    $response = $this->request($url, $ip, $sink, $meta);
+                } catch (Throwable) {
+                    return $this->truncated($sink, $meta);
+                }
 
-            if ($response->redirect()) {
-                $url = $this->resolveLocation($url, (string) $response->header('Location'));
+                if ($response->redirect()) {
+                    $url = $this->resolveLocation($url, (string) $response->header('Location'));
 
-                if ($url === null) {
+                    if ($url === null) {
+                        return null;
+                    }
+
+                    continue;
+                }
+
+                if (! $response->successful()) {
                     return null;
                 }
 
-                continue;
-            }
+                $html = $this->readBody($response);
 
-            if (! $response->successful() || ! str_contains((string) $response->header('Content-Type'), 'html')) {
-                return null;
+                return $this->looksLikeHtml((string) $response->header('Content-Type'), $html) ? $html : null;
+            } finally {
+                if (is_resource($sink)) {
+                    fclose($sink);
+                }
             }
-
-            return $this->readBody($response);
         }
 
         return null;
     }
 
-    protected function request(string $url, string $ip): Response
+    /**
+     * @param  resource  $sink
+     * @param  array{status: ?int, type: ?string, truncated: bool}  $meta
+     */
+    protected function request(string $url, string $ip, $sink, array &$meta): Response
     {
-        $host = (string) parse_url($url, PHP_URL_HOST);
-        $pinned = str_contains($ip, ':') ? "[{$ip}]" : $ip;
-
         return Http::timeout(config('ai-visibility.http.website_fetch_timeout', 10))
             ->withUserAgent(config('ai-visibility.http.user_agent'))
             ->accept('text/html')
             ->withoutRedirecting()
-            ->withOptions([
-                'stream' => true,
-                // Connect to the address that was checked, so DNS cannot change in between.
-                'curl' => defined('CURLOPT_RESOLVE') ? [CURLOPT_RESOLVE => ["{$host}:443:{$pinned}", "{$host}:80:{$pinned}"]] : [],
-            ])
+            ->withOptions($this->requestOptions($url, $ip, $sink, $meta))
             ->get($url);
     }
 
     /**
-     * The body, read up to MAX_BYTES; null when the page says it is larger.
+     * Guzzle options for one request: connect to the checked address, and stop
+     * the transfer once MAX_BYTES are read or the page is clearly not HTML.
+     *
+     * Never "stream": Guzzle's stream handler refuses the "curl" option, and
+     * the cURL handler is what pins the address (CURLOPT_RESOLVE).
+     *
+     * @param  resource  $sink
+     * @param  array{status: ?int, type: ?string, truncated: bool}  $meta
+     * @return array<string, mixed>
      */
-    protected function readBody(Response $response): ?string
+    protected function requestOptions(string $url, string $ip, $sink, array &$meta): array
     {
-        $length = $response->header('Content-Length');
+        $host = strtolower((string) parse_url($url, PHP_URL_HOST));
+        $pinned = str_contains($ip, ':') ? "[{$ip}]" : $ip;
 
-        if (is_numeric($length) && (int) $length > self::MAX_BYTES) {
+        return [
+            'sink' => $sink,
+            // Connect to the address that was checked, so DNS cannot change in between.
+            'curl' => defined('CURLOPT_RESOLVE') ? [CURLOPT_RESOLVE => ["{$host}:443:{$pinned}", "{$host}:80:{$pinned}"]] : [],
+            'on_headers' => function (ResponseInterface $response) use (&$meta) {
+                $meta['status'] = $response->getStatusCode();
+                $meta['type'] = $response->getHeaderLine('Content-Type');
+
+                if ($meta['status'] < 200 || $meta['status'] >= 300) {
+                    return;
+                }
+
+                if ($meta['type'] !== '' && ! str_contains(strtolower($meta['type']), 'html')) {
+                    throw new RuntimeException("Not an HTML page ({$meta['type']}).");
+                }
+            },
+            // Returning true stops the transfer; what was read so far stays in the sink.
+            'progress' => function ($total, $downloaded) use (&$meta) {
+                if ($downloaded > self::MAX_BYTES) {
+                    $meta['truncated'] = true;
+
+                    return true;
+                }
+
+                return false;
+            },
+        ];
+    }
+
+    /**
+     * The start of a page whose transfer was stopped at the size limit; null
+     * when the request failed for any other reason.
+     *
+     * @param  resource  $sink
+     * @param  array{status: ?int, type: ?string, truncated: bool}  $meta
+     */
+    protected function truncated($sink, array $meta): ?string
+    {
+        if (! $meta['truncated'] || $meta['status'] < 200 || $meta['status'] >= 300 || ! is_resource($sink)) {
             return null;
         }
 
+        rewind($sink);
+        $html = (string) stream_get_contents($sink, self::MAX_BYTES);
+
+        return $html !== '' && $this->looksLikeHtml((string) $meta['type'], $html) ? $html : null;
+    }
+
+    /**
+     * The body, read up to MAX_BYTES (a larger page is cut off there).
+     */
+    protected function readBody(Response $response): string
+    {
         $stream = $response->toPsrResponse()->getBody();
         $html = '';
 
@@ -176,16 +247,26 @@ class EvidenceFetcher
             $html .= $chunk;
         }
 
-        // Close a live connection without downloading the rest.
-        if (! $stream->isSeekable()) {
-            $stream->close();
-        }
-
         return $html;
     }
 
     /**
-     * The absolute URL a redirect points to, or null when there is none.
+     * Served as HTML, or served without a content type but starting like an HTML document.
+     */
+    protected function looksLikeHtml(string $contentType, string $body): bool
+    {
+        if (trim($contentType) !== '') {
+            return str_contains(strtolower($contentType), 'html');
+        }
+
+        $start = strtolower(ltrim(substr($body, 0, 512), "\xEF\xBB\xBF \t\r\n"));
+
+        return str_starts_with($start, '<!doctype html') || str_starts_with($start, '<html');
+    }
+
+    /**
+     * The absolute URL a redirect points to (relative paths and query-only
+     * locations included), or null when there is none.
      */
     protected function resolveLocation(string $current, string $location): ?string
     {
@@ -195,17 +276,33 @@ class EvidenceFetcher
             return null;
         }
 
-        if (str_starts_with($location, '//')) {
-            return parse_url($current, PHP_URL_SCHEME) . ':' . $location;
+        try {
+            return (string) UriResolver::resolve(new Uri($current), new Uri($location));
+        } catch (Throwable) {
+            return null;
+        }
+    }
+
+    /**
+     * The URL with an internationalised host in its ASCII form ("münchen.de"
+     * → "xn--mnchen-3ya.de"); null when it cannot be converted.
+     */
+    protected function asciiUrl(string $url): ?string
+    {
+        $host = parse_url($url, PHP_URL_HOST);
+
+        if (! is_string($host) || ! preg_match('/[^\x00-\x7F]/', $host)) {
+            return $url;
         }
 
-        if (preg_match('#^[a-z][a-z0-9+.-]*:#i', $location)) {
-            return $location;
+        if (! function_exists('idn_to_ascii')) {
+            return null;
         }
 
-        $base = parse_url($current, PHP_URL_SCHEME) . '://' . parse_url($current, PHP_URL_HOST);
+        $ascii = idn_to_ascii($host, IDNA_NONTRANSITIONAL_TO_ASCII, INTL_IDNA_VARIANT_UTS46);
+        $position = strpos($url, $host);
 
-        return $base . (str_starts_with($location, '/') ? $location : '/' . $location);
+        return $ascii === false || $position === false ? null : substr_replace($url, strtolower($ascii), $position, strlen($host));
     }
 
     /**

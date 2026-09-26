@@ -26,7 +26,11 @@ class CandidateActions
     public function accept(Candidate $candidate): Competitor
     {
         $brand = $candidate->brand;
-        app(Limits::class)->ensureCanAddCompetitor($brand);
+
+        // Re-tracking its existing competitor adds nothing, so the limit does not apply.
+        if (! ($candidate->competitor_id && $brand->competitors()->whereKey($candidate->competitor_id)->exists())) {
+            app(Limits::class)->ensureCanAddCompetitor($brand);
+        }
 
         $classification = $candidate->latestClassification;
         $name = $classification?->company_name ?: $candidate->name;
@@ -48,6 +52,18 @@ class CandidateActions
                 }
 
                 throw new CandidateNotOpen("{$candidate->name} was already " . strtolower(Candidate::statuses()[$current?->status] ?? 'removed') . '.');
+            }
+
+            // Tracked before and reopened since: track the same competitor again.
+            $previous = $current->competitor_id
+                ? $brand->competitors()->whereKey($current->competitor_id)->first()
+                : null;
+
+            if ($previous) {
+                $current->forceFill(['status' => Candidate::STATUS_ACCEPTED])->save();
+                $candidate->setRawAttributes($current->getAttributes(), true);
+
+                return $previous;
             }
 
             $competitor = $brand->competitors()->create([

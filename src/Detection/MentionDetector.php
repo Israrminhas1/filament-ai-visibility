@@ -7,11 +7,13 @@ use IsrarMinhas\FilamentAiVisibility\Models\Competitor;
 use IsrarMinhas\FilamentAiVisibility\Support\Text;
 
 /**
- * Finds the brand and its competitors in an answer: whole-word,
- * case-insensitive matches of names, aliases and their short forms
- * ("Nintendo" for "Nintendo Co., Ltd."), ignoring links, email addresses,
- * bare domains and each subject's exclusion phrases. Where names overlap,
- * the longest match wins, whichever subject it belongs to.
+ * Finds the brand and its competitors in an answer: whole-word matches of
+ * names and aliases in any case, and of their short forms and domain labels
+ * ("Nintendo" for "Nintendo Co., Ltd.") in the name's own casing or in
+ * capitals. Links, email addresses, bare domains and each subject's exclusion
+ * phrases are ignored, except that a subject's own domain written as a name
+ * ("Booking.com is ...") counts. Where names overlap, the longest match wins,
+ * whichever subject it belongs to.
  */
 class MentionDetector
 {
@@ -32,6 +34,20 @@ class MentionDetector
     }
 
     /**
+     * What spans() needs for a brand or competitor: [names in any case,
+     * exclusions, derived terms in exact case, domains].
+     *
+     * @return array{0: array<string>, 1: array<string>, 2: array<string>, 3: array<string>}
+     */
+    public static function subject(Brand|Competitor $subject): array
+    {
+        $domains = $subject->domains ?? [];
+        [$named, $derived] = Text::terms($subject->names(), $domains);
+
+        return [array_values($named), $subject->exclusions ?? [], array_values($derived), $domains];
+    }
+
+    /**
      * @param  iterable<Competitor>  $competitors
      * @return array<Mention> Ordered by position (first named first).
      */
@@ -39,15 +55,15 @@ class MentionDetector
     {
         $text = Text::clean($answer);
 
-        $subjects = [['brand', $brand->getKey(), static::terms($brand), $brand->exclusions ?? []]];
+        $subjects = [['brand', $brand->getKey(), static::subject($brand)]];
 
         foreach ($competitors as $competitor) {
-            $subjects[] = ['competitor', $competitor->getKey(), static::terms($competitor), $competitor->exclusions ?? []];
+            $subjects[] = ['competitor', $competitor->getKey(), static::subject($competitor)];
         }
 
         $found = [];
 
-        foreach ($this->spans($text, array_map(fn ($subject) => [$subject[2], $subject[3]], $subjects)) as $span) {
+        foreach ($this->spans($text, array_map(fn ($subject) => $subject[2], $subjects)) as $span) {
             $found[$span['subject']][] = $span;
         }
 
@@ -79,8 +95,11 @@ class MentionDetector
      * Non-overlapping matches of several subjects in text already passed
      * through Text::clean(), in text order. Where matches overlap, the longest
      * wins, whichever subject it belongs to ("Acme Cloud Pro" over "Acme").
+     * Names match in any case, derived terms only in the casings from
+     * Text::casings(), and a bare domain that is one of the subject's own
+     * domains ("Booking.com") counts as one match.
      *
-     * @param  array<int|string, array{0: array<string>, 1: array<string>}>  $subjects  key => [terms, exclusions]
+     * @param  array<int|string, array{0: array<string>, 1: array<string>, 2?: array<string>, 3?: array<string>}>  $subjects  key => [names, exclusions, derived terms, domains]
      * @return array<int, array{start: int, end: int, text: string, subject: int|string}>
      */
     public function spans(string $text, array $subjects): array
@@ -89,8 +108,22 @@ class MentionDetector
         $candidates = [];
         $order = 0;
 
-        foreach ($subjects as $key => [$names, $exclusions]) {
-            foreach ($this->matches($text, $names, $links, $this->excludedRanges($text, $exclusions)) as $match) {
+        foreach ($subjects as $key => $subject) {
+            [$names, $exclusions] = $subject;
+            $excluded = $this->excludedRanges($text, $exclusions);
+            $casings = [];
+
+            foreach ($subject[2] ?? [] as $term) {
+                array_push($casings, ...Text::casings(trim(Text::clean((string) $term))));
+            }
+
+            $matches = [
+                ...$this->matches($text, $names, $links, $excluded, 'iu'),
+                ...$this->matches($text, $casings, $links, $excluded, 'u'),
+                ...$this->ownDomains($text, $subject[3] ?? [], $links, $excluded),
+            ];
+
+            foreach ($matches as $match) {
                 $candidates[] = $match + ['subject' => $key, 'order' => $order];
             }
 
@@ -121,16 +154,17 @@ class MentionDetector
      * @param  array<string>  $names
      * @param  array<array{0: int, 1: int}>  $links
      * @param  array<array{0: int, 1: int}>  $excluded
+     * @param  string  $flags  "iu" for any case, "u" for exact case
      * @return array<int, array{start: int, end: int, text: string}>
      */
-    protected function matches(string $text, array $names, array $links, array $excluded): array
+    protected function matches(string $text, array $names, array $links, array $excluded, string $flags = 'iu'): array
     {
         $matches = [];
 
         foreach ($names as $name) {
             $name = trim($name);
 
-            if ($name === '' || ! preg_match_all('/' . Text::namePattern($name) . '/iu', $text, $found, PREG_OFFSET_CAPTURE)) {
+            if ($name === '' || ! preg_match_all('/' . Text::namePattern($name) . '/' . $flags, $text, $found, PREG_OFFSET_CAPTURE)) {
                 continue;
             }
 
@@ -149,26 +183,56 @@ class MentionDetector
     }
 
     /**
+     * Bare domains in the text that are one of the domains or a subdomain of
+     * one ("Booking.com is the largest OTA"): the subject written as its domain.
+     *
+     * @param  array<string>  $domains
+     * @param  array<array{0: int, 1: int, 2: ?string}>  $links
+     * @param  array<array{0: int, 1: int}>  $excluded
+     * @return array<int, array{start: int, end: int, text: string}>
+     */
+    protected function ownDomains(string $text, array $domains, array $links, array $excluded): array
+    {
+        $matches = [];
+
+        foreach ($domains === [] ? [] : $links as [$start, $end, $host]) {
+            if ($host !== null && ! $this->inRanges($start, $end, $excluded) && Domains::matches($host, $domains)) {
+                $matches[] = ['start' => $start, 'end' => $end, 'text' => substr($text, $start, $end - $start)];
+            }
+        }
+
+        return $matches;
+    }
+
+    /**
      * Byte ranges of links, email addresses and bare domains ("acme.com/pricing",
      * "support@acme.io", "notion.so"). Names inside them are not mentions.
+     * A bare domain without a path also carries its host, as it may be a
+     * subject's own domain written as its name. The top-level domain must be
+     * lowercase, so "I use Acme.It works." has no domain in it.
      *
-     * @return array<array{0: int, 1: int}>
+     * @return array<array{0: int, 1: int, 2: ?string}>
      */
     protected function linkRanges(string $text): array
     {
         $patterns = [
             '#(?:https?://|www\.)[^\s)\]>"\']+#iu',
             '/[\p{L}\p{N}._%+-]+@[\p{L}\p{N}-]+(?:\.[\p{L}\p{N}-]+)+/u',
-            '#(?<![\p{L}\p{N}@.-])(?:[\p{L}\p{N}](?:[\p{L}\p{N}-]*[\p{L}\p{N}])?\.)+(?:' . static::TLDS . ')(?![\p{L}\p{N}-])(?:/[^\s)\]>"\']*)?#iu',
+            '#(?<![\p{L}\p{N}@./-])((?:[\p{L}\p{N}](?:[\p{L}\p{N}-]*[\p{L}\p{N}])?\.)+(?:' . static::TLDS . '))(?![\p{L}\p{N}-])(/[^\s)\]>"\']*)?#u',
         ];
 
         $ranges = [];
 
-        foreach ($patterns as $pattern) {
-            if (preg_match_all($pattern, $text, $found, PREG_OFFSET_CAPTURE)) {
-                foreach ($found[0] as [$match, $start]) {
-                    $ranges[] = [$start, $start + strlen(rtrim($match, '.,;:!?'))];
-                }
+        foreach ($patterns as $index => $pattern) {
+            if (! preg_match_all($pattern, $text, $found, PREG_OFFSET_CAPTURE | PREG_SET_ORDER)) {
+                continue;
+            }
+
+            foreach ($found as $groups) {
+                [$match, $start] = $groups[0];
+                $bare = $index === 2 && ($groups[2][0] ?? '') === '' && stripos($match, 'www.') !== 0;
+
+                $ranges[] = [$start, $start + strlen(rtrim($match, '.,;:!?')), $bare ? mb_strtolower($groups[1][0]) : null];
             }
         }
 
@@ -179,7 +243,7 @@ class MentionDetector
      * Inside a link, unless the match is the whole link: a brand named
      * "Monday.com" is still found when written on its own.
      *
-     * @param  array<array{0: int, 1: int}>  $links
+     * @param  array<array{0: int, 1: int, 2: ?string}>  $links
      */
     protected function inLink(int $start, int $end, array $links): bool
     {

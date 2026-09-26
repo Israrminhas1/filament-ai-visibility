@@ -32,11 +32,11 @@ class AnswerHighlighter
         $brand = $result->brand;
 
         if ($brand) {
-            $subjects[] = [MentionDetector::terms($brand), $brand->exclusions ?? []];
+            $subjects[] = MentionDetector::subject($brand);
             $styles[] = static::BRAND_STYLE;
 
             foreach ($brand->competitors->where('is_active', true) as $competitor) {
-                $subjects[] = [MentionDetector::terms($competitor), $competitor->exclusions ?? []];
+                $subjects[] = MentionDetector::subject($competitor);
                 $styles[] = static::COMPETITOR_STYLE;
             }
         }

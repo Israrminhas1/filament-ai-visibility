@@ -17,6 +17,7 @@ class ManageConnections extends ManageRecords
         return [
             CreateAction::make()
                 ->label('Connect source')
+                ->authorize(fn () => ConnectionResource::canCreate())
                 ->using(function (array $data) {
                     $connection = ConnectionResource::save($data);
                     $result = app(KeywordSourceRegistry::class)->get($connection->type)->test($connection);

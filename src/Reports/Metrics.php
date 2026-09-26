@@ -89,14 +89,19 @@ class Metrics
 
     /**
      * Limit a mentions query to the brand and its active competitors, leaving
-     * out untracked names (entities) and paused competitors.
+     * out untracked names (entities) and paused competitors. A competitor
+     * picked explicitly ($alsoCompetitor) is kept even while paused.
      *
      * @param  Builder|\Illuminate\Database\Query\Builder  $query
      */
-    public function whereTracked($query, ReportFilters $filters): void
+    public function whereTracked($query, ReportFilters $filters, ?int $alsoCompetitor = null): void
     {
         $mentions = Model::prefixedTable('mentions');
         $competitors = $this->trackedCompetitorIds($filters);
+
+        if ($alsoCompetitor !== null && ! in_array($alsoCompetitor, $competitors, true)) {
+            $competitors[] = $alsoCompetitor;
+        }
 
         $query->where(fn ($query) => $query
             ->where("{$mentions}.subject_type", 'brand')
@@ -365,6 +370,9 @@ class Metrics
         if ($topics->isEmpty()) {
             return collect();
         }
+
+        // Every topic gets its own numbers, whatever topic the page is filtered to.
+        $filters = new ReportFilters($filters->brand, $filters->from, $filters->until, $filters->engine);
 
         $now = $this->visibilityByTopic($filters);
         $before = $this->visibilityByTopic($filters->previous());

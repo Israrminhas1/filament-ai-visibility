@@ -18,6 +18,7 @@ use Filament\Schemas\Schema;
 use Filament\Tables\Columns\TextColumn;
 use Filament\Tables\Columns\ToggleColumn;
 use Filament\Tables\Table;
+use IsrarMinhas\FilamentAiVisibility\AiVisibilityPlugin;
 use IsrarMinhas\FilamentAiVisibility\Engines\EngineRegistry;
 use IsrarMinhas\FilamentAiVisibility\Enums\RunFrequency;
 use IsrarMinhas\FilamentAiVisibility\Filament\Actions\RunNowAction;
@@ -97,8 +98,10 @@ class BrandResource extends Resource
                                     ->helperText('Mentions inside these phrases are not counted. Useful when the brand name is a common word.'),
                             ]),
 
+                        // Budgets, engines and limits: only for users who can manage settings.
                         Tab::make('Settings')
                             ->icon('heroicon-o-adjustments-horizontal')
+                            ->visible(fn () => AiVisibilityPlugin::userCanManage())
                             ->schema([
                                 Section::make('Overrides for this brand')
                                     ->description('Leave a field empty to use the global setting (shown as the placeholder).')

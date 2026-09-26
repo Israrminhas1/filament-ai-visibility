@@ -3,6 +3,7 @@
 namespace IsrarMinhas\FilamentAiVisibility\Http\Middleware;
 
 use Closure;
+use Filament\Facades\Filament;
 use Illuminate\Http\Request;
 use IsrarMinhas\FilamentAiVisibility\AiVisibilityPlugin;
 use IsrarMinhas\FilamentAiVisibility\Alerts\StallWatcher;
@@ -30,7 +31,8 @@ class RedirectToSetup
 
         $plugin = AiVisibilityPlugin::current();
 
-        if (! $plugin?->hasSetupWizard()) {
+        // This runs before the panel's auth middleware: guests go on to the login redirect.
+        if (! $plugin?->hasSetupWizard() || ! $this->isLoggedIn()) {
             return $next($request);
         }
 
@@ -48,6 +50,15 @@ class RedirectToSetup
         $url = AiVisibilityPlugin::pageUrl(Setup::class);
 
         return $url ? redirect()->to($url) : $next($request);
+    }
+
+    protected function isLoggedIn(): bool
+    {
+        try {
+            return Filament::auth()->check();
+        } catch (\Throwable) {
+            return auth()->check();
+        }
     }
 
     protected function routeName(string $page): ?string

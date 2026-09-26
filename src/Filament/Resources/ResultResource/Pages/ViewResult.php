@@ -102,6 +102,11 @@ class ViewResult extends ViewRecord
 
         $result = $this->result();
 
+        // Answers without a run are not a sequence: stepping would walk every run-less answer.
+        if ($result->run_id === null) {
+            return $this->neighbours[$direction] = null;
+        }
+
         $id = Result::query()
             ->where('run_id', $result->run_id)
             ->where('id', $direction === 'next' ? '>' : '<', $result->getKey())

@@ -316,6 +316,9 @@ return [
             'recency' => 0.10,
         ],
         // Never treated as competitors (search engines, link shorteners…).
+        // Platforms that are never competitors (reddit.com, youtube.com, g2.com…). Null uses
+        // the built-in list; set an array to replace it.
+        'platform_domains' => null,
         'ignored_domains' => [
             'google.com', 'bing.com', 'duckduckgo.com', 'yahoo.com', 'baidu.com', 'yandex.com',
             'googleusercontent.com', 'gstatic.com', 'vertexaisearch.cloud.google.com',
@@ -337,6 +340,8 @@ return [
         'retry_for_seconds' => 3600,
         // Hours without progress before a run's unanswered results are failed and the run is closed.
         'stale_run_hours' => 6,
+        // Longest single queue delay in seconds (SQS allows 900); longer waits are split into steps.
+        'max_queue_delay' => 900,
     ],
 
     /*
@@ -347,6 +352,19 @@ return [
     'alerts' => [
         // At most one "engine paused" alert per engine and reason in this many hours (0 = no limit).
         'engine_alert_throttle_hours' => 6,
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
+    | Import limits
+    |--------------------------------------------------------------------------
+    |
+    | Per-brand limits (brands, prompts, keywords…) are set in Settings.
+    |
+    */
+    'limits' => [
+        // Most rows read from one prompt CSV/paste import (0 = no cap).
+        'max_import_rows' => 5000,
     ],
 
     /*
@@ -411,6 +429,8 @@ return [
             'auto_accept' => false,
             'reclassify_days' => 90,
             'ignored_domains' => [],
+            // Platforms (e.g. amazon.com) that are real competitors for this brand.
+            'allow_platforms' => [],
         ],
         // Custom AI instructions; empty means the built-in default.
         'analysis' => [
@@ -461,6 +481,7 @@ return [
         'limits.max_active_prompts_per_brand',
         'limits.max_runs_per_brand_per_day',
         'budget.monthly_usd',
+        'discovery.allow_platforms',
     ],
 
     /*

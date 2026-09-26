@@ -11,6 +11,7 @@ use IsrarMinhas\FilamentAiVisibility\Exceptions\HelperUnavailable;
 use IsrarMinhas\FilamentAiVisibility\Models\Brand;
 use IsrarMinhas\FilamentAiVisibility\Models\Result;
 use IsrarMinhas\FilamentAiVisibility\Models\Usage;
+use IsrarMinhas\FilamentAiVisibility\Runs\Redetector;
 use IsrarMinhas\FilamentAiVisibility\Support\HelperAi;
 use IsrarMinhas\FilamentAiVisibility\Support\Instructions;
 use IsrarMinhas\FilamentAiVisibility\Support\Text;
@@ -135,17 +136,22 @@ class AnswerAnalyzer
                 continue;
             }
 
-            $this->applyMentions($result, (array) ($row['mentions'] ?? []), $subjects);
+            // Re-checking answers (Redetector) rebuilds mention rows: write under the same lock, to the current rows.
+            Redetector::lock($result)->block(10, function () use ($result, $row, $subjects) {
+                $result->load('mentions');
 
-            if ($result->entities_extracted_at === null) {
-                $this->storeOtherNames($result, (array) ($row['other_names'] ?? []), $subjects);
-            }
+                $this->applyMentions($result, (array) ($row['mentions'] ?? []), $subjects);
 
-            $result->forceFill([
-                'analysis_status' => self::DONE,
-                'analyzed_at' => now(),
-                'entities_extracted_at' => $result->entities_extracted_at ?? now(),
-            ])->save();
+                if ($result->entities_extracted_at === null) {
+                    $this->storeOtherNames($result, (array) ($row['other_names'] ?? []), $subjects);
+                }
+
+                $result->forceFill([
+                    'analysis_status' => self::DONE,
+                    'analyzed_at' => now(),
+                    'entities_extracted_at' => $result->entities_extracted_at ?? now(),
+                ])->save();
+            });
 
             $done++;
         }

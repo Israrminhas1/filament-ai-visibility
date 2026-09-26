@@ -7,6 +7,8 @@ use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Bus\Dispatchable;
 use Illuminate\Queue\InteractsWithQueue;
+use Illuminate\Queue\MaxAttemptsExceededException;
+use Illuminate\Support\Facades\Cache;
 use IsrarMinhas\FilamentAiVisibility\Engines\EngineManager;
 use IsrarMinhas\FilamentAiVisibility\Engines\EngineRegistry;
 use IsrarMinhas\FilamentAiVisibility\Engines\EngineRequest;
@@ -49,9 +51,15 @@ class RunResultJob implements ShouldQueue
     public int $timeout = 240;
 
     /**
-     * Seconds this job may keep retrying, counted from dispatch (see dispatchPaced()).
+     * Unix time of this job's slot on the engine's shared schedule (see dispatchPaced()).
+     * A job picked up earlier waits for it.
      */
-    public ?int $retryFor = null;
+    public ?int $availableAt = null;
+
+    /**
+     * Unix time after which this job stops retrying.
+     */
+    public ?int $retryUntilAt = null;
 
     public function __construct(
         public readonly int $resultId,
@@ -65,41 +73,101 @@ class RunResultJob implements ShouldQueue
     /**
      * Queue answers for one engine, spaced out at the engine's requests-per-minute.
      *
-     * Every job used to get the same fixed retry window from dispatch, so in a big
-     * run the last jobs spent their window waiting on the rate limiter and failed
-     * before they were ever tried. Now job N waits for its own slot (N / rpm
-     * minutes) and its window is that wait plus the configured window, with the wait counted twice
-     * as a margin for other runs sharing the limit: at least the configured
-     * window (1 hour by default), at most 24 hours.
+     * The rate limit is shared by every run of the tenant on that engine, so the
+     * spacing is too: each call reserves the next free slots on one schedule per
+     * tenant and engine (several brands starting in the same minute queue behind
+     * each other instead of all starting at once). Each job may retry for the
+     * configured window counted from its own slot, so waiting for the slot never
+     * uses up its retries, however big the backlog.
      *
      * @param  iterable<int>  $resultIds
      */
     public static function dispatchPaced(iterable $resultIds, string $engine, int | string | null $tenantId): int
     {
+        $ids = collect($resultIds)->map(fn ($id) => (int) $id)->values();
+
+        if ($ids->isEmpty()) {
+            return 0;
+        }
+
         $rpm = max(1, Tenancy::as($tenantId, fn () => app(EngineManager::class)->requestsPerMinute($engine)));
         $window = max(3600, (int) config('ai-visibility.tracking.retry_for_seconds', 3600));
-        $queued = 0;
+        $interval = 60000 / $rpm;
+        $first = static::reserveSlots($tenantId, $engine, $ids->count(), $interval);
+        $now = now()->getTimestamp();
 
-        foreach ($resultIds as $resultId) {
-            $wait = intdiv($queued, $rpm) * 60;
-            $job = (new static((int) $resultId, $engine, $tenantId))->retryFor(min(86400, $window + $wait * 2));
+        foreach ($ids as $i => $resultId) {
+            $slot = intdiv((int) ($first + $i * $interval), 1000);
+            $job = (new static($resultId, $engine, $tenantId))->pace($slot, $slot + $window);
 
-            if ($wait > 0) {
-                $job->delay($wait);
+            // Long waits are split up: the job releases itself until its slot (see RateLimitEngine).
+            if ($slot > $now) {
+                $job->delay(min($slot - $now, static::maxDelay()));
             }
 
             dispatch($job);
-            $queued++;
         }
 
-        return $queued;
+        return $ids->count();
     }
 
-    public function retryFor(int $seconds): static
+    /**
+     * Reserve consecutive slots on the tenant and engine's schedule.
+     *
+     * @return float The first slot, in milliseconds.
+     */
+    protected static function reserveSlots(int | string | null $tenantId, string $engine, int $count, float $interval): float
     {
-        $this->retryFor = $seconds;
+        $key = static::scheduleKey($tenantId, $engine);
+
+        return Cache::lock("{$key}:lock", 10)->block(10, function () use ($key, $count, $interval) {
+            $now = (float) now()->getPreciseTimestamp(3);
+            $first = max($now, (float) Cache::get($key, 0));
+            $next = $first + $count * $interval;
+
+            Cache::put($key, $next, now()->addSeconds((int) ceil(($next - $now) / 1000) + 3600));
+
+            return $first;
+        });
+    }
+
+    /**
+     * Unix time until which the tenant and engine's schedule is taken, or null when it is free.
+     */
+    public static function scheduledUntil(int | string | null $tenantId, string $engine): ?int
+    {
+        $next = (int) floor((float) Cache::get(static::scheduleKey($tenantId, $engine), 0) / 1000);
+
+        return $next > now()->getTimestamp() ? $next : null;
+    }
+
+    protected static function scheduleKey(int | string | null $tenantId, string $engine): string
+    {
+        return "ai-visibility:schedule:{$tenantId}:{$engine}";
+    }
+
+    /**
+     * Longest queue delay used at once (SQS allows at most 15 minutes).
+     */
+    public static function maxDelay(): int
+    {
+        return max(1, (int) config('ai-visibility.tracking.max_queue_delay', 900));
+    }
+
+    public function pace(int $availableAt, int $retryUntil): static
+    {
+        $this->availableAt = $availableAt;
+        $this->retryUntilAt = max($retryUntil, $availableAt + 60);
 
         return $this;
+    }
+
+    /**
+     * A claim outlives the job's timeout, so it is only taken over from a worker that really died.
+     */
+    public function claimExpiresAfter(): int
+    {
+        return $this->timeout + 60;
     }
 
     public function middleware(): array
@@ -109,7 +177,9 @@ class RunResultJob implements ShouldQueue
 
     public function retryUntil(): DateTimeInterface
     {
-        return now()->addSeconds($this->retryFor ?? (int) config('ai-visibility.tracking.retry_for_seconds', 3600));
+        return $this->retryUntilAt !== null
+            ? now()->setTimestamp($this->retryUntilAt)
+            : now()->addSeconds((int) config('ai-visibility.tracking.retry_for_seconds', 3600));
     }
 
     public function handle(): void
@@ -128,7 +198,13 @@ class RunResultJob implements ShouldQueue
         }
 
         // Claim it first: a duplicate job (retry, re-dispatch) must never pay for the same answer.
-        if (! $progress->claim($result)) {
+        if (! $progress->claim($result, $this->claimExpiresAfter())) {
+            // Another worker is answering it. Come back when its claim would expire, in case that
+            // worker died: the answer is then asked again instead of being lost.
+            if ($left = $progress->claimHeldFor($result, $this->claimExpiresAfter())) {
+                $this->release(min($left + 1, static::maxDelay()));
+            }
+
             return;
         }
 
@@ -246,11 +322,24 @@ class RunResultJob implements ShouldQueue
         Tenancy::as($this->tenantId, function () use ($exception) {
             $result = Result::query()->find($this->resultId);
 
-            if ($result && in_array($result->status, [ResultStatus::Pending, ResultStatus::Running], true)) {
-                app(RunProgress::class)->finish($result, ResultStatus::Failed, [
-                    'error' => $exception ? str($exception->getMessage())->limit(500)->toString() : 'The job failed.',
-                ]);
+            if (! $result || ! in_array($result->status, [ResultStatus::Pending, ResultStatus::Running], true)) {
+                return;
             }
+
+            $progress = app(RunProgress::class);
+
+            // A duplicate of this job is still answering it: leave it to that worker.
+            if ($progress->claimHeldFor($result, $this->claimExpiresAfter())) {
+                return;
+            }
+
+            $progress->finish($result, ResultStatus::Failed, [
+                'error' => match (true) {
+                    $exception instanceof MaxAttemptsExceededException => RunProgress::RETRY_WINDOW_EXPIRED,
+                    $exception !== null => str($exception->getMessage())->limit(500)->toString(),
+                    default => 'The job failed.',
+                },
+            ]);
         });
     }
 }

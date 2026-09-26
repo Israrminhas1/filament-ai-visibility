@@ -4,6 +4,8 @@ namespace IsrarMinhas\FilamentAiVisibility\Commands;
 
 use Illuminate\Console\Command;
 use IsrarMinhas\FilamentAiVisibility\Engines\EngineManager;
+use IsrarMinhas\FilamentAiVisibility\Engines\KeyResolver;
+use IsrarMinhas\FilamentAiVisibility\Enums\PauseReason;
 use IsrarMinhas\FilamentAiVisibility\Support\Health\CheckResult;
 use IsrarMinhas\FilamentAiVisibility\Support\Health\SystemHealth;
 
@@ -18,8 +20,14 @@ class HealthCommand extends Command
 
     protected $description = 'Check the scheduler, queue and engines. Exits with 1 when something needs attention.';
 
-    public function handle(SystemHealth $health, EngineManager $engines): int
+    public function handle(SystemHealth $health, EngineManager $engines, KeyResolver $keys): int
     {
+        if (filled($tenant = $this->option('tenant')) && ! $engines->isKnownTenant($tenant)) {
+            $this->components->error("Unknown tenant [{$tenant}].");
+
+            return self::FAILURE;
+        }
+
         $failed = false;
 
         foreach ($health->checks() as $check) {
@@ -38,17 +46,18 @@ class HealthCommand extends Command
             $failed = $failed || $check->status === CheckResult::FAILED;
         }
 
-        $engines->forEachTenant($this->option('tenant'), function (int | string | null $tenant) use ($engines, &$failed) {
-            $failed = ! $this->checkEngines($engines, $tenant !== null ? "[tenant {$tenant}] " : '') || $failed;
+        $engines->forEachTenant($this->option('tenant'), function (int | string | null $tenant) use ($engines, $keys, &$failed) {
+            $failed = ! $this->checkEngines($engines, $keys, $tenant !== null ? "[tenant {$tenant}] " : '') || $failed;
         });
 
         return $failed ? self::FAILURE : self::SUCCESS;
     }
 
     /**
-     * Whether every enabled engine is usable.
+     * Whether every enabled engine is usable. Read-only: a health check never
+     * creates engine state or pauses an engine.
      */
-    protected function checkEngines(EngineManager $engines, string $prefix): bool
+    protected function checkEngines(EngineManager $engines, KeyResolver $keys, string $prefix): bool
     {
         $ok = true;
         $enabled = $engines->enabled();
@@ -59,12 +68,19 @@ class HealthCommand extends Command
 
         foreach ($enabled as $engine) {
             $label = $prefix . $engines->registry()->get($engine)->label();
+            $state = $engines->existingState($engine);
 
-            if ($engines->isUsable($engine)) {
+            // A key added since a "no key" pause lifts it on the next run.
+            $reason = match (true) {
+                $state !== null && ! $state->isUsable() && ! ($state->reason === PauseReason::MissingKey && $keys->has($engine)) => $state->reason ?? PauseReason::Manual,
+                ! $keys->has($engine) => PauseReason::MissingKey,
+                default => null,
+            };
+
+            if ($reason === null) {
                 $this->components->info("{$label}: active");
             } else {
-                $state = $engines->state($engine);
-                $this->components->error("{$label}: paused ({$state->reason?->getLabel()})");
+                $this->components->error("{$label}: paused ({$reason->getLabel()})");
                 $ok = false;
             }
         }

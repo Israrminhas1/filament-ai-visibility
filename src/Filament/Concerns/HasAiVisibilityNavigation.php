@@ -9,7 +9,8 @@ use IsrarMinhas\FilamentAiVisibility\AiVisibilityPlugin;
  * `protected static int $aiVisibilitySort`.
  *
  * The sort also decides the navigation group when groups are split:
- * below 10 is reports, 10–79 is tracking and 80 or more is admin.
+ * below 10 is reports, 10–79 is tracking and 80 or more is admin. Screens that
+ * require settings access (such as Setup) are always admin.
  */
 trait HasAiVisibilityNavigation
 {
@@ -33,6 +34,7 @@ trait HasAiVisibilityNavigation
     public static function aiVisibilityArea(): string
     {
         return match (true) {
+            static::requiresSettingsAccess() => 'admin',
             static::$aiVisibilitySort < 10 => 'reports',
             static::$aiVisibilitySort < 80 => 'tracking',
             default => 'admin',

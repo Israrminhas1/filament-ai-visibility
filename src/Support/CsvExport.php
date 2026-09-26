@@ -17,17 +17,28 @@ class CsvExport
     {
         return response()->streamDownload(function () use ($headers, $rows) {
             $out = fopen('php://output', 'w');
-
-            // Excel needs the BOM to read UTF-8 correctly.
-            fwrite($out, "\xEF\xBB\xBF");
-            fputcsv($out, $headers, escape: '\\');
-
-            foreach ($rows as $row) {
-                fputcsv($out, array_map([static::class, 'cell'], $row), escape: '\\');
-            }
-
+            static::write($out, $headers, $rows);
             fclose($out);
         }, $filename, ['Content-Type' => 'text/csv; charset=UTF-8']);
+    }
+
+    /**
+     * Writes the CSV to an open stream. No escape character is used, so a value
+     * ending in "\" stays in its own cell (Importer reads it back the same way).
+     *
+     * @param  resource  $out
+     * @param  array<string>  $headers
+     * @param  iterable<array<int, mixed>>  $rows
+     */
+    public static function write($out, array $headers, iterable $rows): void
+    {
+        // Excel needs the BOM to read UTF-8 correctly.
+        fwrite($out, "\xEF\xBB\xBF");
+        fputcsv($out, $headers, escape: '');
+
+        foreach ($rows as $row) {
+            fputcsv($out, array_map([static::class, 'cell'], $row), escape: '');
+        }
     }
 
     /**

@@ -4,6 +4,7 @@ namespace IsrarMinhas\FilamentAiVisibility\Runs;
 
 use Carbon\CarbonInterface;
 use IsrarMinhas\FilamentAiVisibility\Enums\ResultStatus;
+use IsrarMinhas\FilamentAiVisibility\Jobs\RunResultJob;
 use IsrarMinhas\FilamentAiVisibility\Models\Batch;
 use IsrarMinhas\FilamentAiVisibility\Models\Result;
 use IsrarMinhas\FilamentAiVisibility\Models\Run;
@@ -49,8 +50,16 @@ class RunSweeper
             return false;
         }
 
-        // Economy batches may take up to a day; the batch poller retries what they miss.
-        $batchDeadline = now()->subHours((int) config('ai-visibility.economy.give_up_after_hours', 26));
+        // Answers still waiting for their slot on a busy engine schedule (see RunResultJob::dispatchPaced()).
+        foreach ($this->progress->open($run)->distinct()->pluck('engine') as $engine) {
+            if (RunResultJob::scheduledUntil($run->tenant_id, $engine) !== null) {
+                return false;
+            }
+        }
+
+        // Economy batches may take up to a day. The batch poller gives up on them after
+        // give_up_after_hours and answers the rest in real time: leave it 2 hours to do so first.
+        $batchDeadline = now()->subHours((int) config('ai-visibility.economy.give_up_after_hours', 26) + 2);
 
         if (Batch::query()->withoutGlobalScopes()->where('run_id', $run->getKey())->where('status', Batch::SUBMITTED)->where('submitted_at', '>=', $batchDeadline)->exists()) {
             return false;

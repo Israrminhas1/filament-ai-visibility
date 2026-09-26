@@ -95,6 +95,10 @@ class ManageSettings extends Page
         $settings = app(Settings::class);
         $all = $settings->all();
 
+        if (! empty($all['alerts']['user_ids'])) {
+            $all['alerts']['user_ids'] = $this->recipientsInScope($all['alerts']['user_ids']);
+        }
+
         $this->form->fill([
             ...$all,
             'limits' => array_map(fn ($value) => $value ? $value : null, $all['limits'] ?? []),
@@ -103,6 +107,38 @@ class ManageSettings extends Page
             'engines_economy' => (bool) ($all['engines']['economy'] ?? false),
             'kill_switch' => $settings->killSwitch(),
         ]);
+    }
+
+    /**
+     * Saved alert recipients the current user may still pick. Users who left the scope
+     * (another team, a narrower alertRecipientsQuery()) are dropped when the form opens,
+     * with a notice, so they do not block saving; they stop receiving alerts once saved.
+     *
+     * @param  array<int|string>  $ids
+     * @return array<int|string>
+     */
+    protected function recipientsInScope(array $ids): array
+    {
+        $query = static::alertRecipientsQuery();
+
+        if (! $query) {
+            return array_values($ids);
+        }
+
+        $allowed = $query->whereKey($ids)->pluck($query->getModel()->getKeyName())->map(fn ($id) => (string) $id)->all();
+        $kept = array_values(array_filter($ids, fn ($id) => in_array((string) $id, $allowed, true)));
+
+        if (count($kept) < count($ids)) {
+            $dropped = count($ids) - count($kept);
+
+            Notification::make()
+                ->title($dropped === 1 ? '1 alert recipient was removed' : "{$dropped} alert recipients were removed")
+                ->body('They are no longer users you can choose. Save the settings to stop sending them alerts.')
+                ->warning()
+                ->send();
+        }
+
+        return $kept;
     }
 
     public static function schemaComponents(bool $includeEngines = true): array

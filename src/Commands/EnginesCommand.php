@@ -5,6 +5,7 @@ namespace IsrarMinhas\FilamentAiVisibility\Commands;
 use Illuminate\Console\Command;
 use IsrarMinhas\FilamentAiVisibility\Engines\EngineManager;
 use IsrarMinhas\FilamentAiVisibility\Engines\KeyResolver;
+use IsrarMinhas\FilamentAiVisibility\Enums\EngineStatus;
 
 /**
  * In a multi-tenant install this acts on every tenant, or on one with --tenant.
@@ -22,6 +23,12 @@ class EnginesCommand extends Command
     {
         if (($engine = $this->option('resume')) && ! $engines->registry()->has($engine)) {
             $this->components->error("Unknown engine [{$engine}].");
+
+            return self::FAILURE;
+        }
+
+        if (filled($tenant = $this->option('tenant')) && ! $engines->isKnownTenant($tenant)) {
+            $this->components->error("Unknown tenant [{$tenant}].");
 
             return self::FAILURE;
         }
@@ -60,14 +67,15 @@ class EnginesCommand extends Command
         $rows = [];
 
         foreach ($engines->registry()->all() as $key => $engine) {
-            $state = $engines->state($key);
+            // Read-only: listing engines never creates their state.
+            $state = $engines->existingState($key);
             $test = $this->option('test') && in_array($key, $enabled, true) ? $engines->test($key) : null;
 
             $rows[] = [
                 $engine->label(),
                 in_array($key, $enabled, true) ? 'yes' : 'no',
                 $keys->source($key)['source'] ?? '—',
-                $state->status->getLabel() . ($state->reason ? " ({$state->reason->getLabel()})" : ''),
+                $state ? $state->status->getLabel() . ($state->reason ? " ({$state->reason->getLabel()})" : '') : EngineStatus::Active->getLabel(),
                 $test ? $test->message : '',
             ];
         }

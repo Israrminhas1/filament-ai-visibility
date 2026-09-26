@@ -25,7 +25,7 @@ class PausedEngines extends Widget
 
     public static function canView(): bool
     {
-        return static::issues() !== [];
+        return (AiVisibilityPlugin::current()?->isAuthorized() ?? true) && static::issues() !== [];
     }
 
     /**

@@ -245,12 +245,19 @@ Everyone who can use the panel can use AI Visibility by default. Two options nar
 AiVisibilityPlugin::make()
     // Who can open AI Visibility at all (every screen).
     ->authorizeUsing(fn ($user) => $user->can('view-ai-visibility'))
-    // Who can change settings, API keys, budgets and alerts, run the setup
-    // wizard, and pause, resume or test engines on the Health page.
+    // Who can change settings, API keys, budgets and alerts (the full list is below).
     ->canManageSettings(fn ($user) => $user->is_admin);   // or true / false
 ```
 
-Screens a user can't open are hidden from the navigation and return 403. Users who can't manage settings still see the Health page, without its buttons. Both callbacks receive the logged-in user. Resource policies, if you have them, still apply on top.
+`canManageSettings()` gates exactly these:
+
+- **Settings** and the **Setup** wizard (whole pages).
+- **Alert rules** and **Scheduled reports** (whole screens).
+- **Keyword sources**: connecting, editing, testing, syncing and removing a source (they hold API keys). Others can still see the list.
+- **Brands → Settings tab**: per-brand engines, samples, limits and monthly budget. The tab is hidden for others, and a save by them never changes these values.
+- **Health**: pausing, resuming and testing engines. Others see the page without its buttons.
+
+Everything else (reports, brands, prompts, keywords, runs, answers, the alerts inbox) follows `authorizeUsing()` only. Screens a user can't open are hidden from the navigation and return 403. Both callbacks receive the logged-in user and are never called for guests (a guest is simply not authorized). Resource policies, if you have them, still apply on top.
 
 **Alert recipients**: the "Panel users who receive alerts" picker is searchable and only offers users the current user should see. With Filament tenancy it lists the current tenant's `users()` or `members()`; without such a relationship, only yourself. Without tenancy it starts with yourself, and you search for others. To choose the users yourself:
 
@@ -273,7 +280,7 @@ AiVisibilityPlugin::make()
     ->withoutEngine('grok');
 ```
 
-By default the screens are split into three navigation groups: **AI Visibility** (Overview and reports), **AI Visibility · Tracking** (Brands, Prompts, Keywords, Keyword sources, Discovered, Runs, Answers) and **AI Visibility · Admin** (Alerts, Alert rules, Scheduled reports, Settings, Health). `->navigationGroup('Marketing')` puts everything in one group; add `->navigationGroups()` after it to keep the split with that name ("Marketing", "Marketing · Tracking", "Marketing · Admin").
+By default the screens are split into three navigation groups (if you upgrade from a version with a single group, your navigation changes; add `->navigationGroups(false)` to keep one group): **AI Visibility** (Overview and reports), **AI Visibility · Tracking** (Brands, Prompts, Keywords, Keyword sources, Discovered, Runs, Answers) and **AI Visibility · Admin** (Setup, Alerts, Alert rules, Scheduled reports, Settings, Health). `->navigationGroup('Marketing')` puts everything in one group; add `->navigationGroups()` after it to keep the split with that name ("Marketing", "Marketing · Tracking", "Marketing · Admin").
 
 ## Artisan commands
 

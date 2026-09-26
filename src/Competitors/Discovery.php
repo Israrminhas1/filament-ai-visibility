@@ -9,6 +9,7 @@ use IsrarMinhas\FilamentAiVisibility\Enums\ResultStatus;
 use IsrarMinhas\FilamentAiVisibility\Models\Brand;
 use IsrarMinhas\FilamentAiVisibility\Models\Candidate;
 use IsrarMinhas\FilamentAiVisibility\Models\Citation;
+use IsrarMinhas\FilamentAiVisibility\Models\Classification;
 use IsrarMinhas\FilamentAiVisibility\Models\Model;
 use IsrarMinhas\FilamentAiVisibility\Models\Result;
 use IsrarMinhas\FilamentAiVisibility\Models\ResultMention;
@@ -43,11 +44,12 @@ class Discovery
         $maxPrompts = max(1, (int) collect($groups)->max(fn ($g) => count($g['prompts'])));
 
         // Matched the way MySQL's unique index compares them: "pokémon" and "pokemon" are one key.
-        $existing = Candidate::query()->where('brand_id', $brand->getKey())->get()
-            ->keyBy(fn (Candidate $candidate) => static::keyFor($candidate->key));
+        $existing = Candidate::query()->where('brand_id', $brand->getKey())->orderBy('id')->get()
+            ->groupBy(fn (Candidate $candidate) => static::keyFor($candidate->key));
+        $seen = [];
 
         foreach ($groups as $key => $group) {
-            $candidate = $existing->get($key) ?? new Candidate([
+            $candidate = $this->merge($existing->get($key), $key) ?? new Candidate([
                 'brand_id' => $brand->getKey(),
                 'tenant_id' => $brand->tenant_id,
                 'key' => $key,
@@ -55,6 +57,8 @@ class Discovery
             ]);
 
             $candidate->fill([
+                // Rows stored before keys were folded ("name:pokémon") take the folded key.
+                'key' => $key,
                 'kind' => $group['kind'],
                 'name' => $group['name'],
                 'domain' => $group['domain'],
@@ -66,16 +70,49 @@ class Discovery
                 'last_seen_at' => $group['last'],
                 'score' => $this->score($group, $totals, $maxAnswers, $maxPrompts),
             ])->save();
+
+            $seen[] = $candidate->getKey();
         }
 
         // Open candidates no longer seen in the window drop to the bottom.
         Candidate::query()
             ->where('brand_id', $brand->getKey())
             ->whereIn('status', [Candidate::STATUS_NEW, Candidate::STATUS_CLASSIFIED])
-            ->whereNotIn('key', array_keys($groups))
+            ->whereNotIn('id', $seen)
             ->update(['answers' => 0, 'prompts' => 0, 'score' => 0]);
 
         return count($groups);
+    }
+
+    /**
+     * The one row to keep for a key when several stored keys fold to it
+     * ("name:pokémon" and "name:pokemon", possible outside MySQL). A row the
+     * user decided on wins, then the one already holding the folded key; the
+     * other open rows are merged into it and removed, so the folded key can be
+     * stored without a unique clash. Other decided rows are left as they are.
+     *
+     * @param  Collection<int, Candidate>|null  $rows
+     */
+    protected function merge(?Collection $rows, string $key): ?Candidate
+    {
+        if (! $rows || $rows->isEmpty()) {
+            return null;
+        }
+
+        $keep = $rows->sortBy(fn (Candidate $c) => [$c->isOpen() ? 1 : 0, $c->key === $key ? 0 : 1, $c->getKey()])->first();
+
+        foreach ($rows as $row) {
+            if ($row->is($keep)) {
+                continue;
+            }
+
+            if ($row->isOpen()) {
+                Classification::query()->where('candidate_id', $row->getKey())->update(['candidate_id' => $keep->getKey()]);
+                $row->delete();
+            }
+        }
+
+        return $keep;
     }
 
     /**
@@ -106,6 +143,7 @@ class Discovery
         $mentions = Model::prefixedTable('mentions');
         $excluded = $this->excludedDomains($brand);
         $knownNames = $this->knownNames($brand);
+        $allowed = NoiseFilter::allowedPlatforms($brand);
 
         $scope = fn ($query) => $query
             ->where("{$results}.brand_id", $brand->getKey())
@@ -164,7 +202,7 @@ class Discovery
             $key = $nameKeys[$label] ?? $nameKeys[str_replace('.', '', $domain)] ?? 'domain:' . $domain;
 
             // Review sites, forums and publishers are not candidates on their own.
-            if (str_starts_with($key, 'domain:') && NoiseFilter::nonCompetitorCategory($domain)) {
+            if (str_starts_with($key, 'domain:') && NoiseFilter::nonCompetitorCategory($domain) && ! Domains::matches('https://' . $domain, $allowed)) {
                 continue;
             }
 
@@ -233,7 +271,7 @@ class Discovery
     protected function excludedDomains(Brand $brand): array
     {
         $domains = [
-            ...NoiseFilter::ignoredDomains(),
+            ...NoiseFilter::ignoredDomains($brand),
             ...($brand->domains ?? []),
         ];
 

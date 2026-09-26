@@ -345,7 +345,11 @@ it('leaves runs waiting on a batch alone until the batch is overdue', function (
     $this->travel(20)->hours();
     expect(app(RunSweeper::class)->sweep())->toBe([]);
 
+    // Past give_up_after_hours (26), the batch poller gets 2 hours to close the batch first.
     $this->travel(7)->hours();
+    expect(app(RunSweeper::class)->sweep())->toBe([]);
+
+    $this->travel(2)->hours();
     expect(app(RunSweeper::class)->sweep())->toBe([$run->getKey()])
         ->and($run->fresh()->results_failed)->toBe(2);
 });

@@ -123,7 +123,7 @@ class AlertEvaluator
      */
     protected function lastState(AlertRule $rule, Brand $brand): array
     {
-        if (! $this->isPerBrand($rule)) {
+        if (! $this->isPerBrand($rule) || ! $this->lastSendRecorded($rule)) {
             return [$rule->last_fingerprint, $rule->last_triggered_at];
         }
 
@@ -134,6 +134,25 @@ class AlertEvaluator
             ->first();
 
         return [$event?->payload[self::FINGERPRINT] ?? null, $event?->created_at];
+    }
+
+    /**
+     * Whether the rule's last send made it into the inbox. The inbox insert
+     * never stops an alert, so if it failed the per-brand state is missing;
+     * the rule's own columns then hold the cooldown instead of the rule
+     * firing again on every evaluation.
+     */
+    protected function lastSendRecorded(AlertRule $rule): bool
+    {
+        if (! $rule->last_triggered_at) {
+            return true;
+        }
+
+        // The event is written just before the rule is saved; allow for slow channels in between.
+        return AlertEvent::query()
+            ->where('alert_rule_id', $rule->getKey())
+            ->where('created_at', '>=', $rule->last_triggered_at->copy()->subMinutes(5))
+            ->exists();
     }
 
     /**

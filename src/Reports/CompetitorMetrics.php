@@ -117,11 +117,12 @@ class CompetitorMetrics
      */
     public function perception(ReportFilters $filters, ?int $competitorId = null): array
     {
-        $data = $this->data($filters);
+        $include = $this->untracked($filters, $competitorId);
+        $data = $this->data($filters, $include);
         $key = $competitorId ? "competitor:{$competitorId}" : 'brand:' . $filters->brand->getKey();
         $stats = $data['subjects'][$key] ?? null;
 
-        $descriptors = $stats ? $this->descriptors($filters, $competitorId) : [];
+        $descriptors = $stats ? $this->descriptors($filters, $competitorId, $include) : [];
         arsort($descriptors);
 
         return [
@@ -147,8 +148,9 @@ class CompetitorMetrics
         $rivalAnswers = [];
         $promptOf = [];
 
-        // Only the answers naming either side are read.
-        $rows = $this->mentionRows($filters)
+        // Only the answers naming either side are read; a paused competitor
+        // picked here is still compared.
+        $rows = $this->mentionRows($filters, $this->untracked($filters, (int) $competitor->getKey()))
             ->where(fn (Builder $query) => $query
                 ->where("{$mentions}.subject_type", 'brand')
                 ->orWhere(fn (Builder $query) => $query->where("{$mentions}.subject_type", 'competitor')->where("{$mentions}.subject_id", $competitor->getKey())))
@@ -319,7 +321,7 @@ class CompetitorMetrics
     /**
      * Mentions of the brand and its active competitors, joined to the period's answers.
      */
-    protected function mentionRows(ReportFilters $filters): Builder
+    protected function mentionRows(ReportFilters $filters, ?int $include = null): Builder
     {
         $mentions = Model::prefixedTable('mentions');
         $results = Model::prefixedTable('results');
@@ -328,9 +330,20 @@ class CompetitorMetrics
             ->toBase()
             ->join($mentions, "{$mentions}.result_id", '=', "{$results}.id");
 
-        $this->metrics->whereTracked($query, $filters);
+        $this->metrics->whereTracked($query, $filters, $include);
 
         return $query;
+    }
+
+    /**
+     * The competitor's ID when it is not tracked (paused), so it can be read
+     * when picked explicitly; null when the tracked set already covers it.
+     */
+    protected function untracked(ReportFilters $filters, ?int $competitorId): ?int
+    {
+        return $competitorId !== null && ! in_array($competitorId, $this->metrics->trackedCompetitorIds($filters), true)
+            ? $competitorId
+            : null;
     }
 
     /**
@@ -338,12 +351,12 @@ class CompetitorMetrics
      *
      * @return array<string, int>
      */
-    protected function descriptors(ReportFilters $filters, ?int $competitorId): array
+    protected function descriptors(ReportFilters $filters, ?int $competitorId, ?int $include = null): array
     {
         $mentions = Model::prefixedTable('mentions');
         $counts = [];
 
-        $this->mentionRows($filters)
+        $this->mentionRows($filters, $include)
             ->where("{$mentions}.subject_type", $competitorId ? 'competitor' : 'brand')
             ->when($competitorId, fn (Builder $query) => $query->where("{$mentions}.subject_id", $competitorId))
             ->whereNotNull("{$mentions}.descriptors")
@@ -366,9 +379,9 @@ class CompetitorMetrics
      *
      * @return array{answers: int, engineAnswers: array<string, int>, subjects: array<string, array{answers: int, engines: array<string, int>, mentions: int, position_sum: int, first: int, analysed: int, sentiment: array<string, int>, recommendation: array<string, int>}>, cited: array<string, int>}
      */
-    protected function data(ReportFilters $filters): array
+    protected function data(ReportFilters $filters, ?int $include = null): array
     {
-        $cacheKey = implode('|', [$filters->brand->getKey(), $filters->from, $filters->until, $filters->engine, $filters->topicId]);
+        $cacheKey = implode('|', [$filters->brand->getKey(), $filters->from, $filters->until, $filters->engine, $filters->topicId, $include]);
 
         if (isset($this->cache[$cacheKey])) {
             return $this->cache[$cacheKey];
@@ -394,7 +407,7 @@ class CompetitorMetrics
         $sentiments = array_column(Sentiment::cases(), 'value');
         $recommendations = array_column(Recommendation::cases(), 'value');
 
-        $query = $this->mentionRows($filters)
+        $query = $this->mentionRows($filters, $include)
             ->selectRaw("{$mentions}.subject_type as subject_type, {$mentions}.subject_id as subject_id, {$results}.engine as engine")
             ->selectRaw("COUNT(DISTINCT {$results}.id) as answers, COUNT(*) as mentions, SUM({$mentions}.position) as position_sum")
             ->selectRaw("SUM(CASE WHEN {$mentions}.position = 1 THEN 1 ELSE 0 END) as firsts")

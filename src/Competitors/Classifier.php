@@ -40,6 +40,7 @@ class Classifier
 
     /**
      * Classify the brand's highest-scoring open candidates that need it.
+     * Tracked, rejected and ignored candidates are never classified again.
      *
      * @param  Collection<int, Candidate>|null  $candidates  Specific candidates; default the top N due.
      * @return int Number classified.
@@ -48,7 +49,7 @@ class Classifier
      */
     public function classify(Brand $brand, ?Collection $candidates = null): int
     {
-        $candidates ??= $this->due($brand);
+        $candidates = ($candidates ?? $this->due($brand))->filter->isOpen()->values();
         $count = 0;
 
         foreach ($candidates->chunk((int) config('ai-visibility.discovery.classification_batch', 10)) as $batch) {
@@ -142,6 +143,14 @@ class Classifier
         $count = 0;
 
         foreach ($batch as $candidate) {
+            // The user may have tracked, rejected or ignored it while the AI was answering.
+            $status = Candidate::query()->whereKey($candidate->getKey())->value('status');
+
+            if ($status === null || ! in_array($status, [Candidate::STATUS_NEW, Candidate::STATUS_CLASSIFIED], true)) {
+                continue;
+            }
+
+            $candidate->setRawAttributes(['status' => $status] + $candidate->getAttributes(), true);
             $row = $results->get($candidate->getKey());
             $label = $row ? CompetitorLabel::tryFrom((string) ($row['label'] ?? '')) : null;
 

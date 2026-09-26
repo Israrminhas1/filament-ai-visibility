@@ -3,6 +3,7 @@
 use Carbon\CarbonImmutable;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Mail;
+use Illuminate\Support\Facades\Schema;
 use IsrarMinhas\FilamentAiVisibility\Alerts\AlertEvaluator;
 use IsrarMinhas\FilamentAiVisibility\Alerts\AlertType;
 use IsrarMinhas\FilamentAiVisibility\Alerts\StallWatcher;
@@ -275,7 +276,7 @@ describe('scheduled reports', function () {
     it('records failures and retries later', function () {
         Mail::shouldReceive('to')->andThrow(new RuntimeException('SMTP down'));
 
-        expect(app(ReportSender::class)->send($this->schedule))->toBeFalse()
+        expect(app(ReportSender::class)->send($this->schedule, scheduled: true))->toBeFalse()
             ->and($this->schedule->fresh()->last_error)->toBe('SMTP down')
             ->and($this->schedule->fresh()->next_send_at->isFuture())->toBeTrue()
             ->and($this->schedule->fresh()->is_active)->toBeTrue()
@@ -305,6 +306,16 @@ describe('all-brands alert rules', function () {
             ->and($this->evaluator->evaluate($this->brand))->toBe(0)
             ->and($this->evaluator->evaluate($this->other))->toBe(0)
             ->and(AlertEvent::query()->pluck('brand_id')->sort()->values()->all())->toBe(collect([$this->brand->id, $this->other->id])->sort()->values()->all());
+    });
+
+    it('falls back to the rule cooldown when the inbox could not be written', function () {
+        rule(AlertType::VisibilityDrop, ['days' => 7, 'points' => 20]);
+        dropFor($this->brand, $this->prompt);
+        AlertEvent::creating(fn () => false);
+
+        expect($this->evaluator->evaluate($this->brand))->toBe(1)
+            ->and($this->evaluator->evaluate($this->brand))->toBe(0)
+            ->and(AlertEvent::query()->count())->toBe(0);
     });
 
     it('finds new competitors per brand', function () {
@@ -424,7 +435,7 @@ describe('report schedules', function () {
         $sender = app(ReportSender::class);
 
         foreach (range(1, 3) as $attempt) {
-            expect($sender->send($this->schedule))->toBeFalse();
+            expect($sender->send($this->schedule, scheduled: true))->toBeFalse();
         }
 
         expect($this->schedule->fresh()->is_active)->toBeFalse()
@@ -433,7 +444,70 @@ describe('report schedules', function () {
 
         // Turning it back on starts the count again.
         $this->schedule->update(['is_active' => true]);
-        expect($this->schedule->failures())->toBe(0);
+        expect($this->schedule->failureCount())->toBe(0)
+            ->and($this->schedule->fresh()->failures)->toBe(0);
+    });
+
+    it('does not count failed "Send now" attempts or move the send day', function () {
+        Mail::shouldReceive('to')->andThrow(new RuntimeException('SMTP down'));
+        $this->schedule->update(['next_send_at' => '2026-09-14 08:00:00']);
+
+        foreach (range(1, 4) as $attempt) {
+            expect(app(ReportSender::class)->send($this->schedule))->toBeFalse();
+        }
+
+        $schedule = $this->schedule->fresh();
+
+        expect($schedule->is_active)->toBeTrue()
+            ->and($schedule->failureCount())->toBe(0)
+            ->and($schedule->last_error)->toBe('SMTP down')
+            ->and($schedule->next_send_at->toDateTimeString())->toBe('2026-09-14 08:00:00')
+            ->and(AlertEvent::query()->count())->toBe(0);
+    });
+
+    it('keeps the send day after a successful "Send now"', function () {
+        $this->schedule->update(['next_send_at' => '2026-09-14 08:00:00']);
+
+        expect(app(ReportSender::class)->send($this->schedule))->toBeTrue()
+            ->and($this->schedule->fresh()->next_send_at->toDateTimeString())->toBe('2026-09-14 08:00:00')
+            ->and($this->schedule->fresh()->last_sent_at)->not->toBeNull();
+    });
+
+    it('sends from the next regular day when turned back on', function () {
+        $this->schedule->update(['is_active' => false]);
+        $this->travelTo(CarbonImmutable::parse('2026-09-23 10:00:00'));
+
+        $this->schedule->update(['is_active' => true]);
+
+        expect($this->schedule->fresh()->next_send_at->toDateTimeString())->toBe('2026-09-28 08:00:00');
+    });
+
+    it('sends the same day when created on the send day before 08:00', function () {
+        $this->travelTo(CarbonImmutable::parse('2026-09-14 06:30:00'));
+
+        $weekly = ReportSchedule::query()->create(['brand_id' => $this->brand->id, 'name' => 'Early', 'frequency' => 'weekly', 'recipients' => ['a@example.com']]);
+
+        expect($weekly->next_send_at->toDateTimeString())->toBe('2026-09-14 08:00:00')
+            ->and($weekly->nextSendAfter(CarbonImmutable::parse('2026-09-14 08:00:00'))->toDateTimeString())->toBe('2026-09-21 08:00:00')
+            ->and($weekly->nextSendAfter(CarbonImmutable::parse('2026-09-13 23:00:00'))->toDateTimeString())->toBe('2026-09-14 08:00:00');
+    });
+
+    it('reads the failure count on installs without the failures column', function () {
+        $reset = fn () => Closure::bind(fn () => static::$hasFailuresColumn = null, null, ReportSchedule::class)();
+
+        Schema::table((new ReportSchedule)->getTable(), fn ($table) => $table->dropColumn('failures'));
+        $reset();
+
+        try {
+            $schedule = ReportSchedule::query()->find($this->schedule->id);
+
+            expect($schedule->failures)->toBeNull()
+                ->and($schedule->failureCount())->toBe(0)
+                ->and($schedule->recordFailure())->toBe(1)
+                ->and(ReportSchedule::query()->find($this->schedule->id)->failureCount())->toBe(1);
+        } finally {
+            $reset();
+        }
     });
 
     it('skips reports for inactive brands', function () {

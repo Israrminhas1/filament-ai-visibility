@@ -99,6 +99,30 @@ it('discovers from the list in the background', function () {
     Queue::assertPushed(DiscoverCompetitorsJob::class, 1);
 });
 
+it('says so when discovery is already queued', function () {
+    Queue::fake();
+
+    livewire(ListCandidates::class)->callAction('discover', ['brand_id' => $this->brand->id]);
+    livewire(ListCandidates::class)
+        ->callAction('discover', ['brand_id' => $this->brand->id])
+        ->assertNotified('Discovery is already queued for this brand');
+
+    Queue::assertPushed(DiscoverCompetitorsJob::class, 1);
+});
+
+it('classifies again only candidates still to review', function () {
+    Queue::fake();
+    $this->g2->forceFill(['status' => Candidate::STATUS_REJECTED])->save();
+
+    livewire(ListCandidates::class)
+        ->filterTable('status', [Candidate::STATUS_REJECTED])
+        ->selectTableRecords([$this->g2->id])
+        ->callAction(TestAction::make('classifySelected')->table()->bulk())
+        ->assertNotified('Nothing to classify');
+
+    Queue::assertNothingPushed();
+});
+
 it('classifies again in the background', function () {
     Queue::fake();
 

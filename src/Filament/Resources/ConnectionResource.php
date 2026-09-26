@@ -16,6 +16,8 @@ use Filament\Schemas\Components\Utilities\Get;
 use Filament\Schemas\Schema;
 use Filament\Tables\Columns\TextColumn;
 use Filament\Tables\Table;
+use Illuminate\Database\Eloquent\Model;
+use IsrarMinhas\FilamentAiVisibility\AiVisibilityPlugin;
 use IsrarMinhas\FilamentAiVisibility\Filament\Concerns\HasAiVisibilityNavigation;
 use IsrarMinhas\FilamentAiVisibility\Filament\Resources\ConnectionResource\Pages;
 use IsrarMinhas\FilamentAiVisibility\Filament\Tables\PromptTable;
@@ -49,6 +51,35 @@ class ConnectionResource extends Resource
     public static function getNavigationIcon(): ?string
     {
         return 'heroicon-o-arrows-right-left';
+    }
+
+    /**
+     * Sources hold API keys, so only users who can manage settings add, change,
+     * test, sync or remove them. Everyone else sees the list.
+     */
+    public static function canManageSources(): bool
+    {
+        return AiVisibilityPlugin::userCanManage();
+    }
+
+    public static function canCreate(): bool
+    {
+        return static::canManageSources() && parent::canCreate();
+    }
+
+    public static function canEdit(Model $record): bool
+    {
+        return static::canManageSources() && parent::canEdit($record);
+    }
+
+    public static function canDelete(Model $record): bool
+    {
+        return static::canManageSources() && parent::canDelete($record);
+    }
+
+    public static function canDeleteAny(): bool
+    {
+        return static::canManageSources() && parent::canDeleteAny();
     }
 
     public static function form(Schema $schema): Schema
@@ -102,20 +133,24 @@ class ConnectionResource extends Resource
                 Action::make('sync')
                     ->label('Sync now')
                     ->icon('heroicon-o-arrow-path')
+                    ->authorize(fn () => static::canManageSources())
                     ->action(fn (Connection $record) => static::sync($record)),
                 ActionGroup::make([
                     Action::make('test')
                         ->label('Test')
                         ->icon('heroicon-o-bolt')
+                        ->authorize(fn () => static::canManageSources())
                         ->action(function (Connection $record) {
                             $result = app(KeywordSourceRegistry::class)->get($record->type)->test($record);
 
                             Notification::make()->title($result->message)->status($result->ok ? 'success' : 'danger')->send();
                         }),
                     EditAction::make()
+                        ->authorize(fn (Connection $record) => static::canEdit($record))
                         ->fillForm(fn (Connection $record) => static::fillData($record))
                         ->using(fn (Connection $record, array $data) => static::saveEdit($record, $data)),
-                    DeleteAction::make(),
+                    DeleteAction::make()
+                        ->authorize(fn (Connection $record) => static::canDelete($record)),
                 ]),
             ])
             ->emptyStateHeading('No keyword sources yet')

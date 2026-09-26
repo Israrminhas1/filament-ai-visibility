@@ -15,7 +15,8 @@ use IsrarMinhas\FilamentAiVisibility\Support\Text;
 class NoiseFilter
 {
     /**
-     * Never competitors, whatever the brand does.
+     * Default platforms that are not competitors; replaced by
+     * config('ai-visibility.discovery.platform_domains') when that is set.
      */
     public const PLATFORM_DOMAINS = [
         'reddit.com', 'youtube.com', 'wikipedia.org', 'g2.com', 'capterra.com', 'trustpilot.com',
@@ -66,19 +67,42 @@ class NoiseFilter
     }
 
     /**
-     * Whether a name is the brand or one of its products: it contains the
-     * brand name or an alias as a whole word ("Nintendo Switch 2").
+     * Whether a name is the brand or one of its products: the brand name or
+     * an alias itself (any case, without legal endings), or a name that
+     * starts with it as a whole word, written the same way ("Nintendo Switch 2").
+     *
+     * Only names of 4+ characters (or all-caps acronyms like "HP") count as
+     * a start, so "Go" does not claim "Go Daddy". A different company that
+     * starts with the brand's exact name ("Delta Faucet" for Delta) is still
+     * treated as the brand's own; the user can track it by hand.
      */
     public static function isOwnName(Brand $brand, string $name): bool
     {
-        $name = static::baseName($name);
+        $base = static::baseName($name);
 
-        if ($name === '') {
+        if ($base === '') {
             return false;
         }
 
-        foreach (static::ownNames($brand) as $own) {
-            if ($name === $own || preg_match('/(?<![\p{L}\p{N}])' . preg_quote($own, '/') . '(?![\p{L}\p{N}])/u', $name)) {
+        $written = Text::squish(Text::clean($name));
+
+        foreach ($brand->names() as $own) {
+            $ownBase = static::baseName($own);
+
+            if (mb_strlen($ownBase) < 2) {
+                continue;
+            }
+
+            if ($base === $ownBase) {
+                return true;
+            }
+
+            // The name as written, without legal endings: "HP Inc." → "HP".
+            $words = explode(' ', Text::squish(Text::clean($own)));
+            $term = rtrim(implode(' ', array_slice($words, 0, count(explode(' ', $ownBase)))), ' ,.');
+            $distinct = mb_strlen($term) >= 4 || (mb_strlen($term) >= 2 && $term === mb_strtoupper($term) && preg_match('/\p{Lu}/u', $term));
+
+            if ($distinct && preg_match('/^' . preg_quote($term, '/') . '(?![\p{L}\p{N}])/u', $written)) {
                 return true;
             }
         }
@@ -110,14 +134,56 @@ class NoiseFilter
     }
 
     /**
-     * Built-in platforms plus the configured and user-ignored domains.
+     * Platforms that are never candidates: config('ai-visibility.discovery.platform_domains')
+     * when set (it replaces the built-in list), otherwise PLATFORM_DOMAINS.
+     * For a brand, platforms it competes with are left out (see allowedPlatforms()).
      *
      * @return array<string>
      */
-    public static function ignoredDomains(): array
+    public static function platformDomains(?Brand $brand = null): array
+    {
+        $configured = config('ai-visibility.discovery.platform_domains');
+        $domains = array_values(array_filter(array_map(
+            fn ($domain) => is_string($domain) ? strtolower(trim($domain)) : '',
+            is_array($configured) ? $configured : self::PLATFORM_DOMAINS,
+        )));
+
+        if (! $brand) {
+            return $domains;
+        }
+
+        $allowed = static::allowedPlatforms($brand);
+
+        return array_values(array_filter($domains, fn ($domain) => ! Domains::matches('https://' . $domain, $allowed)));
+    }
+
+    /**
+     * Platforms that are real competitors for this brand: the ones in its
+     * "discovery.allow_platforms" setting, and any it already tracks as a
+     * competitor (a code host tracking GitHub, a shop tracking Amazon).
+     *
+     * @return array<string>
+     */
+    public static function allowedPlatforms(Brand $brand): array
+    {
+        $allowed = array_filter((array) $brand->setting('discovery.allow_platforms', []), 'is_string');
+
+        foreach ($brand->competitors()->get() as $competitor) {
+            array_push($allowed, ...array_filter((array) ($competitor->domains ?? []), 'is_string'));
+        }
+
+        return array_values(array_unique(array_filter(array_map(fn ($domain) => Domains::host($domain), $allowed))));
+    }
+
+    /**
+     * Platforms plus the configured and user-ignored domains.
+     *
+     * @return array<string>
+     */
+    public static function ignoredDomains(?Brand $brand = null): array
     {
         return array_values(array_unique(array_filter([
-            ...self::PLATFORM_DOMAINS,
+            ...static::platformDomains($brand),
             ...(array) config('ai-visibility.discovery.ignored_domains', []),
             ...(array) app(Settings::class)->get('discovery.ignored_domains', []),
         ])));

@@ -149,3 +149,43 @@ it('links to the neighbouring answers of the run', function () {
 it('strips markdown from snippets', function () {
     expect(ResultResource::plainText("## **Acme** is [great](https://acme.com)\n- and `fast`"))->toBe('Acme is great and fast');
 });
+
+it('shows answer images as links instead of loading them', function () {
+    $this->answer->update(['answer' => "Acme is great.\n\n![tracker](https://tracker.example/pixel.gif)\n\n[![logo](https://cdn.example/logo.png)](https://acme.com)"]);
+
+    $this->get(ResultResource::getUrl('view', ['record' => $this->answer]))
+        ->assertOk()
+        ->assertDontSee('<img src="https://tracker', escape: false)
+        ->assertSee('<a href="https://tracker.example/pixel.gif" target="_blank" rel="noopener noreferrer nofollow">[image: tracker]</a>', escape: false)
+        ->assertSee('[image: logo]', escape: false)
+        ->assertDontSee('https://cdn.example/logo.png', escape: false);
+});
+
+it('matches cited domains on their boundaries', function () {
+    expect(ResultResource::mentionsDomain('see notexample.com', 'example.com'))->toBeFalse()
+        ->and(ResultResource::mentionsDomain('see example.com.evil.net', 'example.com'))->toBeFalse()
+        ->and(ResultResource::mentionsDomain('see example.com.', 'example.com'))->toBeTrue()
+        ->and(ResultResource::mentionsDomain('see docs.example.com/guide', 'example.com'))->toBeTrue()
+        ->and(ResultResource::mentionsDomain('(example.com)', 'example.com'))->toBeTrue();
+
+    $this->answer->citations()->create(['url' => 'https://example.com/x', 'domain' => 'example.com', 'position' => 3]);
+    $this->answer->update(['answer' => $this->answer->answer . "\n\nMore at notexample.com."]);
+
+    $rows = ResultResource::sourceRows($this->answer->fresh());
+
+    expect(collect($rows['read'])->pluck('domain'))->toContain('example.com')
+        ->and(collect($rows['cited'])->pluck('domain'))->not->toContain('example.com');
+});
+
+it('loads citation and mention competitors in one query each', function () {
+    $this->answer->citations()->create(['url' => 'https://globex.com', 'domain' => 'globex.com', 'position' => 3, 'competitor_id' => $this->globex->id]);
+    $result = Result::query()->find($this->answer->id);
+
+    \Illuminate\Support\Facades\DB::enableQueryLog();
+    ResultResource::sourceRows($result);
+    ResultResource::mentionRows($result);
+    ResultResource::sourceRows($result);
+    ResultResource::mentionRows($result);
+
+    expect(count(\Illuminate\Support\Facades\DB::getQueryLog()))->toBeLessThanOrEqual(5);
+});

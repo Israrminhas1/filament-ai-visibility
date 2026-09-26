@@ -51,6 +51,13 @@ class Limits
         return max(0, $max - $active);
     }
 
+    public function remainingKeywords(Brand $brand): ?int
+    {
+        $max = $this->maxKeywords($brand);
+
+        return $max === null ? null : max(0, $max - $brand->keywords()->count());
+    }
+
     public function ensureCanCreateBrand(): void
     {
         $max = $this->maxBrands();

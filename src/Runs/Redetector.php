@@ -2,6 +2,8 @@
 
 namespace IsrarMinhas\FilamentAiVisibility\Runs;
 
+use Illuminate\Contracts\Cache\Lock;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use IsrarMinhas\FilamentAiVisibility\Analysis\AnswerAnalyzer;
 use IsrarMinhas\FilamentAiVisibility\Detection\Domains;
@@ -33,26 +35,66 @@ class Redetector
      */
     public function brand(Brand $brand): int
     {
-        $competitors = $brand->competitors()->where('is_active', true)->get();
         $changed = 0;
+        $afterId = 0;
 
-        $brand->results()
-            ->where('status', ResultStatus::Success)
-            ->whereNotNull('answer')
-            ->with('citations')
-            ->chunkById(200, function ($results) use ($brand, $competitors, &$changed) {
-                foreach ($results as $result) {
-                    $changed += (int) $this->result($result, $brand, $competitors);
-                }
-            });
+        do {
+            [$count, $afterId] = $this->chunk($brand, $afterId);
+            $changed += $count;
+        } while ($afterId !== null);
 
         return $changed;
+    }
+
+    /**
+     * Re-check up to $limit answers with an ID above $afterId.
+     *
+     * @return array{0: int, 1: int|null} Answers whose brand result changed, and the last ID
+     *                                    checked when more answers may follow (null when done).
+     */
+    public function chunk(Brand $brand, int $afterId = 0, int $limit = 200): array
+    {
+        $competitors = $brand->competitors()->where('is_active', true)->get();
+
+        $results = $brand->results()
+            ->where('status', ResultStatus::Success)
+            ->whereNotNull('answer')
+            ->where('id', '>', $afterId)
+            ->orderBy('id')
+            ->limit($limit)
+            ->get();
+
+        $changed = $results->sum(fn (Result $result) => (int) $this->result($result, $brand, $competitors));
+
+        return [$changed, $results->count() === $limit ? (int) $results->last()->getKey() : null];
+    }
+
+    /**
+     * Lock held while a result's mentions are rewritten, here and by answer analysis,
+     * so neither writes onto mention rows the other just replaced.
+     */
+    public static function lock(Result | int $result): Lock
+    {
+        return Cache::lock('ai-visibility:result:' . ($result instanceof Result ? $result->getKey() : $result), 30);
     }
 
     /**
      * @param  iterable<\IsrarMinhas\FilamentAiVisibility\Models\Competitor>  $competitors
      */
     protected function result(Result $result, Brand $brand, iterable $competitors): bool
+    {
+        return static::lock($result)->block(10, function () use ($result, $brand, $competitors) {
+            // Answer analysis may have written to it since it was loaded.
+            $result->refresh()->load('citations');
+
+            return $this->redetect($result, $brand, $competitors);
+        });
+    }
+
+    /**
+     * @param  iterable<\IsrarMinhas\FilamentAiVisibility\Models\Competitor>  $competitors
+     */
+    protected function redetect(Result $result, Brand $brand, iterable $competitors): bool
     {
         $competitors = collect($competitors);
         $mentions = $this->mentions->detect((string) $result->answer, $brand, $competitors);

@@ -182,7 +182,8 @@ class AiVisibilityPlugin implements Plugin
     }
 
     /**
-     * Who can change settings, API keys, budgets and engine states, and run setup.
+     * Who can change settings, API keys, per-brand budgets and limits, keyword
+     * sources, alert rules and scheduled reports, pause or test engines, and run setup.
      */
     public function canManageSettings(Closure | bool $condition = true): static
     {
@@ -191,9 +192,19 @@ class AiVisibilityPlugin implements Plugin
         return $this;
     }
 
+    /**
+     * Whether the current user can open AI Visibility. Always false without a logged-in
+     * user, so the callbacks never receive null.
+     */
     public function isAuthorized(): bool
     {
-        return $this->authorizeUsing === null || (bool) ($this->authorizeUsing)(static::user());
+        if ($this->authorizeUsing === null) {
+            return true;
+        }
+
+        $user = static::user();
+
+        return $user !== null && (bool) ($this->authorizeUsing)($user);
     }
 
     public function canManage(): bool
@@ -202,9 +213,13 @@ class AiVisibilityPlugin implements Plugin
             return false;
         }
 
-        return $this->canManageSettings instanceof Closure
-            ? (bool) ($this->canManageSettings)(static::user())
-            : $this->canManageSettings;
+        if (! $this->canManageSettings instanceof Closure) {
+            return $this->canManageSettings;
+        }
+
+        $user = static::user();
+
+        return $user !== null && (bool) ($this->canManageSettings)($user);
     }
 
     /**

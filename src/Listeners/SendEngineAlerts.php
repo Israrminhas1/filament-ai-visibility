@@ -18,6 +18,11 @@ use IsrarMinhas\FilamentAiVisibility\Support\Tenancy;
  * Engine pause/resume alerts are always sent; they cannot be switched off.
  * A flapping engine sends at most one "paused" alert per reason every few
  * hours, and a "resumed" alert only follows a "paused" alert that went out.
+ * Sending a "resumed" alert clears the throttle, so a pause that follows it
+ * is always reported and "resumed" is never the last word on a paused engine.
+ *
+ * The bookkeeping lives in the cache: if the cache is cleared or evicted, an
+ * alert may be repeated or a "resumed" alert skipped, but never worse.
  */
 class SendEngineAlerts
 {
@@ -59,6 +64,10 @@ class SendEngineAlerts
         // Nobody was told about this pause, so there is nothing to follow up.
         if (! Cache::pull($this->cacheKey($event->tenantId, $event->engine, 'open'))) {
             return;
+        }
+
+        foreach (PauseReason::cases() as $reason) {
+            Cache::forget($this->cacheKey($event->tenantId, $event->engine, 'paused:' . $reason->value));
         }
 
         $label = $this->label($event->engine);

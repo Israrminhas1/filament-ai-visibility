@@ -211,3 +211,28 @@ it('reports topics in a few queries with the same numbers as a topic filter', fu
 
     expect($queries)->toBeLessThanOrEqual(6);
 });
+
+it('shows every topic\'s own numbers while the page is filtered to one topic', function () {
+    $pricing = $this->brand->topics()->create(['name' => 'Pricing']);
+    $features = $this->brand->topics()->create(['name' => 'Features']);
+    $this->p1->update(['topic_id' => $features->id]);
+    $this->p2->update(['topic_id' => $pricing->id]);
+
+    $metrics = app(Metrics::class);
+    $all = $metrics->topics($this->filters)->keyBy('name');
+    $filtered = $metrics->topics(ReportFilters::fromState(['brand' => $this->brand->id, 'period' => 30, 'topic' => $pricing->id]))->keyBy('name');
+
+    expect($filtered['Features']['answers'])->toBe(2)
+        ->and($filtered->all())->toEqual($all->all());
+});
+
+it('compares a paused competitor picked for head to head', function () {
+    $this->globex->update(['is_active' => false]);
+
+    $h2h = app(CompetitorMetrics::class)->headToHead($this->filters, $this->globex);
+
+    expect($h2h['rival']['answers'])->toBe(3)
+        ->and($h2h['rival']['visibility'])->toBe(75.0)
+        ->and($h2h['rival']['wins'])->toBeGreaterThan(0)
+        ->and($h2h['brand']['answers'])->toBe(3);
+});

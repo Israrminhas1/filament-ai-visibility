@@ -124,6 +124,8 @@ class ResultResource extends Resource
     {
         $order = ['brand' => 0, 'competitor' => 1];
 
+        $result->loadMissing(['brand', 'mentions.competitor']);
+
         return $result->mentions
             ->each(fn (ResultMention $mention) => $mention->setRelation('result', $result))
             ->sortBy([
@@ -154,8 +156,13 @@ class ResultResource extends Resource
         $answer = mb_strtolower((string) $result->answer);
         $rows = ['cited' => [], 'read' => []];
 
+        $result->loadMissing('citations.competitor');
+
         foreach ($result->citations as $citation) {
-            $inText = $answer !== '' && (str_contains($answer, mb_strtolower($citation->url)) || str_contains($answer, mb_strtolower($citation->domain)));
+            $inText = $answer !== '' && (
+                (filled($citation->url) && str_contains($answer, mb_strtolower((string) $citation->url)))
+                || static::mentionsDomain($answer, (string) $citation->domain)
+            );
 
             $rows[$inText ? 'cited' : 'read'][] = [
                 'position' => $citation->position,
@@ -168,6 +175,66 @@ class ResultResource extends Resource
         }
 
         return $rows;
+    }
+
+    /**
+     * Whether the text names the domain on its own or as a subdomain: "example.com"
+     * matches "docs.example.com" but not "notexample.com" or "example.com.evil.net".
+     */
+    public static function mentionsDomain(string $text, string $domain): bool
+    {
+        $domain = mb_strtolower(trim($domain));
+
+        if ($domain === '' || $text === '') {
+            return false;
+        }
+
+        return (bool) preg_match('/(?<![\p{L}\p{N}_-])' . preg_quote($domain, '/') . '(?![\p{L}\p{N}_-]|\.[\p{L}\p{N}])/iu', $text);
+    }
+
+    /**
+     * The highlighted answer, with images turned into links so viewing an answer never
+     * loads third-party resources (tracking pixels and the like).
+     */
+    public static function answerHtml(Result $result): string
+    {
+        return static::imagesAsLinks(app(AnswerHighlighter::class)->html($result));
+    }
+
+    /**
+     * Replaces each <img> with a "[image: alt]" link to its address. An image inside
+     * a link becomes plain text, since links cannot be nested.
+     */
+    public static function imagesAsLinks(string $html): string
+    {
+        if (stripos($html, '<img') === false) {
+            return $html;
+        }
+
+        $parts = preg_split('/(<[^>]+>)/', $html, -1, PREG_SPLIT_DELIM_CAPTURE) ?: [$html];
+        $inLink = 0;
+
+        foreach ($parts as $index => $part) {
+            if (preg_match('/^<a[\s>]/i', $part)) {
+                $inLink++;
+            } elseif (preg_match('/^<\/a\s*>/i', $part)) {
+                $inLink = max(0, $inLink - 1);
+            } elseif (preg_match('/^<img\b/i', $part)) {
+                $attribute = fn (string $name) => preg_match('/\s' . $name . '\s*=\s*"([^"]*)"/i', $part, $match)
+                    ? html_entity_decode($match[1], ENT_QUOTES | ENT_HTML5, 'UTF-8')
+                    : '';
+
+                $src = trim($attribute('src'));
+                $alt = trim($attribute('alt'));
+                $label = e('[image' . ($alt !== '' ? ': ' . $alt : '') . ']');
+
+                $parts[$index] = ! $inLink && preg_match('#^https?://#i', $src)
+                    ? '<a href="' . e($src) . '" target="_blank" rel="noopener noreferrer nofollow">' . $label . '</a>'
+                    : $label;
+            }
+        }
+
+        return implode('', $parts);
     }
 
     public static function infolist(Schema $schema): Schema
@@ -223,7 +290,7 @@ class ResultResource extends Resource
                     ->schema([
                         View::make('ai-visibility::results.answer')
                             ->viewData(fn (Result $record) => [
-                                'html' => filled($record->answer) ? app(AnswerHighlighter::class)->html($record) : null,
+                                'html' => filled($record->answer) ? static::answerHtml($record) : null,
                                 'empty' => match ($record->status) {
                                     ResultStatus::Skipped => 'Skipped: ' . ($record->skip_reason ?: 'no reason recorded.'),
                                     ResultStatus::Failed => 'Failed: ' . ($record->error ?: 'no error recorded.'),
@@ -386,7 +453,7 @@ class ResultResource extends Resource
                     ->label('Sentiment')
                     ->options(Sentiment::class)
                     // Only offered once answers have been analysed.
-                    ->visible(fn () => Result::query()->whereNotNull('brand_sentiment')->exists()),
+                    ->visible(fn () => once(fn () => Result::query()->whereNotNull('brand_sentiment')->exists())),
                 Filter::make('answered')
                     ->schema([
                         DatePicker::make('from')->label('Answered from'),

@@ -220,6 +220,15 @@ class CandidateResource extends Resource
                         ->label('Classify again')
                         ->icon('heroicon-o-sparkles')
                         ->action(function (Collection $records) {
+                            // Tracked, rejected and ignored candidates keep their decision.
+                            $records = $records->filter->isOpen();
+
+                            if ($records->isEmpty()) {
+                                Notification::make()->title('Nothing to classify')->body('Only candidates still to review are classified again.')->warning()->send();
+
+                                return;
+                            }
+
                             // Runs on the queue: classification calls the AI and can take a while.
                             foreach ($records->groupBy('brand_id') as $brandId => $candidates) {
                                 ClassifyCandidatesJob::dispatch((int) $brandId, $candidates->first()->tenant_id, $candidates->map->getKey()->values()->all());

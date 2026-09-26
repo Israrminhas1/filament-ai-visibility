@@ -27,7 +27,7 @@ class ReportSender
      */
     public function sendDue(ReportSchedule $schedule): ?bool
     {
-        return $this->claim($schedule) ? $this->send($schedule) : null;
+        return $this->claim($schedule) ? $this->send($schedule, scheduled: true) : null;
     }
 
     /**
@@ -59,22 +59,30 @@ class ReportSender
         return true;
     }
 
-    public function send(ReportSchedule $schedule): bool
+    /**
+     * Send the report. Manual sends ("Send now", $scheduled false) leave the
+     * schedule alone: their failures are not counted towards pausing it.
+     */
+    public function send(ReportSchedule $schedule, bool $scheduled = false): bool
     {
         try {
-            Mail::to($schedule->recipients)->send(new ReportMail($this->builder->forSchedule($schedule), $schedule->attach_pdf));
+            Mail::to($schedule->recipients)->send(new ReportMail($this->builder->forSchedule($schedule), (bool) $schedule->attach_pdf));
         } catch (Throwable $e) {
-            $this->failed($schedule, $e);
+            $scheduled
+                ? $this->failed($schedule, $e)
+                : $schedule->forceFill(['last_error' => $e->getMessage()])->save();
 
             return false;
         }
+
+        // A manual send only replaces a pending retry, never a regular send day.
+        $reschedule = $scheduled || $schedule->failureCount() > 0;
 
         $schedule->resetFailures();
         $schedule->forceFill([
             'last_sent_at' => now(),
             'last_error' => null,
-            'next_send_at' => $schedule->nextSendAfter(now()),
-        ])->save();
+        ] + ($reschedule ? ['next_send_at' => $schedule->nextSendAfter(now())] : []))->save();
 
         return true;
     }

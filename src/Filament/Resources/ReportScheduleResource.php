@@ -48,6 +48,11 @@ class ReportScheduleResource extends Resource
         return 'Scheduled reports';
     }
 
+    public static function requiresSettingsAccess(): bool
+    {
+        return true;
+    }
+
     public static function getNavigationIcon(): ?string
     {
         return 'heroicon-o-envelope';

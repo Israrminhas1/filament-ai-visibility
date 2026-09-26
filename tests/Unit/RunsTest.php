@@ -1,6 +1,8 @@
 <?php
 
+use Illuminate\Queue\MaxAttemptsExceededException;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Queue;
 use IsrarMinhas\FilamentAiVisibility\Engines\EngineManager;
@@ -11,7 +13,9 @@ use IsrarMinhas\FilamentAiVisibility\Enums\ResultStatus;
 use IsrarMinhas\FilamentAiVisibility\Enums\RunFrequency;
 use IsrarMinhas\FilamentAiVisibility\Enums\RunStatus;
 use IsrarMinhas\FilamentAiVisibility\Enums\RunTrigger;
+use IsrarMinhas\FilamentAiVisibility\Events\RunCompleted;
 use IsrarMinhas\FilamentAiVisibility\Exceptions\RunNotStarted;
+use IsrarMinhas\FilamentAiVisibility\Jobs\Middleware\RateLimitEngine;
 use IsrarMinhas\FilamentAiVisibility\Jobs\RunResultJob;
 use IsrarMinhas\FilamentAiVisibility\Models\Brand;
 use IsrarMinhas\FilamentAiVisibility\Models\Result;
@@ -379,6 +383,7 @@ describe('reliability', function () {
     });
 
     it('spreads jobs out at the engine rate and gives each its own retry window', function () {
+        $this->freezeTime();
         app(Settings::class)->set(['engines' => ['requests_per_minute' => 1]]);
         $this->brand->prompts()->create(['text' => 'CRM with invoicing?']);
 
@@ -388,42 +393,139 @@ describe('reliability', function () {
 
         expect($jobs)->toHaveCount(3)
             ->and($jobs->map(fn ($job) => $job->delay)->all())->toBe([null, 60, 120])
-            ->and($jobs[2]->retryUntil()->getTimestamp())->toBeGreaterThanOrEqual(now()->addSeconds(3600 + 120)->getTimestamp());
+            ->and($jobs[2]->retryUntil()->getTimestamp())->toBe(now()->addSeconds(120 + 3600)->getTimestamp());
 
-        // Never more than a day, however big the run.
+        // However big the backlog, the window starts at the job's slot, and no single queue delay passes 15 minutes.
         Queue::fake();
         RunResultJob::dispatchPaced(range(1, 2000), 'openai', null);
 
-        expect(Queue::pushed(RunResultJob::class)->last()->retryFor)->toBe(86400);
+        $last = Queue::pushed(RunResultJob::class)->last();
+
+        expect($last->availableAt)->toBe(now()->getTimestamp() + (3 + 1999) * 60)
+            ->and($last->retryUntil()->getTimestamp())->toBe($last->availableAt + 3600)
+            ->and($last->delay)->toBe(900);
+    });
+
+    it('shares the pacing between runs started together, so later runs queue behind earlier ones', function () {
+        $this->freezeTime();
+        config(['ai-visibility.tracking.max_queue_delay' => 100]);
+        app(Settings::class)->set(['engines' => ['requests_per_minute' => 1]]);
+        $other = $this->createBrand(['name' => 'Initech']);
+        $other->prompts()->create(['text' => 'Best CRM?']);
+        $other->prompts()->create(['text' => 'Cheapest CRM?']);
+
+        app(RunPlanner::class)->start($this->brand);
+        app(RunPlanner::class)->start($other);
+
+        $jobs = Queue::pushed(RunResultJob::class)->values();
+        $now = now()->getTimestamp();
+
+        // One schedule for the tenant's engine: the second run's jobs come after the first run's.
+        expect($jobs->map(fn ($job) => $job->availableAt - $now)->all())->toBe([0, 60, 120, 180])
+            ->and($jobs->map(fn ($job) => $job->delay)->all())->toBe([null, 60, 100, 100])
+            ->and($jobs->every(fn ($job) => $job->retryUntil()->getTimestamp() === $job->availableAt + 3600))->toBeTrue();
+
+        // Picked up early (the delay was capped): it waits for its slot without calling the engine.
+        $job = $jobs[3]->withFakeQueueInteractions();
+        $called = false;
+
+        (new RateLimitEngine)->handle($job, function () use (&$called) {
+            $called = true;
+        });
+
+        $job->assertReleased(100);
+        expect($called)->toBeFalse();
+
+        $this->travel(180)->seconds();
+        $job = $jobs[3]->withFakeQueueInteractions();
+        (new RateLimitEngine)->handle($job, function () use (&$called) {
+            $called = true;
+        });
+
+        expect($called)->toBeTrue();
+
+        // Once the schedule has passed, a new run starts straight away.
+        $this->travel(10)->minutes();
+        Queue::fake();
+        RunResultJob::dispatchPaced([1], 'openai', null);
+
+        expect(Queue::pushed(RunResultJob::class)->sole()->delay)->toBeNull();
     });
 
     it('never asks the engine twice for the same answer', function () {
+        $this->freezeTime();
         Http::fake(['api.openai.com/*' => openAiAnswer()]);
         $run = app(RunPlanner::class)->start($this->brand);
 
         $job = Queue::pushed(RunResultJob::class)->first()->withFakeQueueInteractions();
         $result = Result::query()->find($job->resultId);
 
-        expect($job->timeout)->toBe(240);
+        expect($job->timeout)->toBe(240)
+            ->and($job->claimExpiresAfter())->toBe(300);
 
-        // Another worker is answering it right now.
+        // Another worker is answering it right now: come back when its claim would expire, in case it died.
         expect(app(RunProgress::class)->claim($result))->toBeTrue();
         $job->handle();
 
         Http::assertNothingSent();
+        $job->assertReleased(301);
         expect($result->fresh()->status)->toBe(ResultStatus::Running);
 
         // A claim abandoned by a crashed worker is taken over.
         $this->travel(6)->minutes();
+        $job = Queue::pushed(RunResultJob::class)->first()->withFakeQueueInteractions();
         $job->handle();
 
         expect($result->fresh()->status)->toBe(ResultStatus::Success);
 
         // A duplicate of the job does nothing.
+        $job = Queue::pushed(RunResultJob::class)->first()->withFakeQueueInteractions();
         $job->handle();
 
+        $job->assertNotReleased();
         Http::assertSentCount(1);
         expect($run->refresh()->results_done)->toBe(1);
+    });
+
+    it('leaves a result to the worker answering it when a duplicate job gives up, and records a late answer', function () {
+        $this->freezeTime();
+        Event::fake([RunCompleted::class]);
+        $run = app(RunPlanner::class)->start($this->brand);
+        $job = Queue::pushed(RunResultJob::class)->first();
+        $result = Result::query()->find($job->resultId);
+        $progress = app(RunProgress::class);
+
+        // Another worker holds a valid claim: giving up here must not fail it.
+        expect($progress->claim($result, $job->claimExpiresAfter()))->toBeTrue();
+        $job->failed(new MaxAttemptsExceededException('Too many attempts.'));
+
+        expect($result->fresh()->status)->toBe(ResultStatus::Running)
+            ->and($run->refresh()->results_failed)->toBe(0);
+
+        // Once the claim has expired, the result is failed.
+        $this->travel(301)->seconds();
+        $job->failed(new MaxAttemptsExceededException('Too many attempts.'));
+
+        expect($result->fresh()->status)->toBe(ResultStatus::Failed)
+            ->and($result->fresh()->error)->toBe(RunProgress::RETRY_WINDOW_EXPIRED)
+            ->and($run->refresh()->results_failed)->toBe(1);
+
+        // The slow worker's paid answer still arrives: it is recorded and the counters move over.
+        Result::query()->whereKey($result->getKey())->update(['answer' => 'Acme is best.', 'error' => null, 'cost_usd' => 0.02]);
+        $progress->finish($result, ResultStatus::Success);
+
+        expect($result->fresh()->status)->toBe(ResultStatus::Success)
+            ->and($result->fresh()->error)->toBeNull()
+            ->and($run->refresh()->results_failed)->toBe(0)
+            ->and($run->results_done)->toBe(1);
+
+        // Other failures are final.
+        $other = Result::query()->whereKeyNot($result->getKey())->first();
+        $progress->finish($other, ResultStatus::Failed, ['error' => 'Rejected.']);
+        $progress->finish($other, ResultStatus::Success);
+
+        expect($other->fresh()->status)->toBe(ResultStatus::Failed)
+            ->and($run->refresh()->results_done)->toBe(1);
     });
 
     it('counts runs in progress against the budget', function () {

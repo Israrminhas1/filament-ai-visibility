@@ -397,12 +397,61 @@ describe('evidence fetching safety', function () {
     it('reads no more than the size limit', function () {
         Http::fake([
             'big.io/*' => Http::response(str_repeat('a', EvidenceFetcher::MAX_BYTES + 5000), 200, ['Content-Type' => 'text/html']),
-            'huge.io/*' => Http::response('<html></html>', 200, ['Content-Type' => 'text/html', 'Content-Length' => (string) (EvidenceFetcher::MAX_BYTES * 10)]),
         ]);
 
-        expect(strlen((string) $this->fetcher->fetch('https://big.io/')))->toBe(EvidenceFetcher::MAX_BYTES)
-            ->and($this->fetcher->fetch('https://huge.io/'))->toBeNull();
+        expect(strlen((string) $this->fetcher->fetch('https://big.io/')))->toBe(EvidenceFetcher::MAX_BYTES);
     });
+
+    it('pins the checked address with cURL and never asks for a stream', function () {
+        $meta = ['status' => null, 'type' => null, 'truncated' => false];
+        $options = (function () use (&$meta) {
+            return $this->requestOptions('https://Globex.io/about', '2606:2800:220:1::1', fopen('php://memory', 'w+b'), $meta);
+        })->call($this->fetcher);
+
+        // Guzzle's stream handler refuses the "curl" option, which made every real fetch fail.
+        expect($options)->not->toHaveKey('stream')
+            ->and($options['curl'][CURLOPT_RESOLVE])->toBe(['globex.io:443:[2606:2800:220:1::1]', 'globex.io:80:[2606:2800:220:1::1]'])
+            ->and(is_resource($options['sink']))->toBeTrue();
+
+        // The transfer stops once the limit is passed, and pages that are not HTML are refused from their headers.
+        expect($options['progress'](0, EvidenceFetcher::MAX_BYTES))->toBeFalse()
+            ->and($options['progress'](0, EvidenceFetcher::MAX_BYTES + 1))->toBeTrue()
+            ->and($meta['truncated'])->toBeTrue()
+            ->and(fn () => $options['on_headers'](new GuzzleHttp\Psr7\Response(200, ['Content-Type' => 'application/pdf'])))->toThrow(RuntimeException::class);
+
+        $options['on_headers'](new GuzzleHttp\Psr7\Response(200, ['Content-Type' => 'text/html', 'Content-Length' => '5000000']));
+        expect($meta['status'])->toBe(200);
+    });
+
+    it('keeps the start of a page whose transfer was stopped at the limit', function () {
+        $sink = fopen('php://memory', 'w+b');
+        fwrite($sink, '<html><title>Big</title>' . str_repeat('a', EvidenceFetcher::MAX_BYTES));
+
+        $read = fn (array $meta) => (fn () => $this->truncated($sink, $meta))->call($this->fetcher);
+
+        expect(strlen((string) $read(['status' => 200, 'type' => 'text/html', 'truncated' => true])))->toBe(EvidenceFetcher::MAX_BYTES)
+            ->and($read(['status' => 200, 'type' => 'text/html', 'truncated' => false]))->toBeNull()
+            ->and($read(['status' => 404, 'type' => 'text/html', 'truncated' => true]))->toBeNull();
+    });
+
+    it('follows relative and query-only redirects and reads HTML sent without a content type', function () {
+        Http::fake([
+            'globex.io/docs/start' => Http::response('', 302, ['Location' => 'intro?lang=en']),
+            'globex.io/docs/intro?lang=en' => Http::response('', 302, ['Location' => '?lang=de']),
+            'globex.io/docs/intro?lang=de' => Http::response('<!DOCTYPE html><html><title>Globex</title></html>', 200),
+            'plain.io/*' => Http::response('just text', 200),
+        ]);
+
+        expect($this->fetcher->fetch('https://globex.io/docs/start'))->toContain('<title>Globex</title>')
+            ->and($this->fetcher->fetch('https://plain.io/'))->toBeNull();
+    });
+
+    it('reads international domain names', function () {
+        Http::fake(['xn--mnchen-3ya.de/*' => Http::response('<html><title>München</title></html>', 200, ['Content-Type' => 'text/html'])]);
+
+        expect($this->fetcher->fetch('https://münchen.de/'))->toContain('München');
+        Http::assertSent(fn ($request) => str_starts_with($request->url(), 'https://xn--mnchen-3ya.de/'));
+    })->skip(! function_exists('idn_to_ascii'), 'Needs the intl extension');
 });
 
 describe('discovery noise', function () {
@@ -439,6 +488,42 @@ describe('discovery noise', function () {
             ->and(NoiseFilter::isOwnName($this->brand, 'Nintendogs'))->toBeFalse()
             ->and(NoiseFilter::isOwnDomain($this->brand, 'nintendo.co.jp'))->toBeTrue()
             ->and(NoiseFilter::isOwnDomain($this->brand, 'sony.com'))->toBeFalse();
+    });
+
+    it('only treats names that start with the brand as its own', function () {
+        $hp = $this->createBrand(['name' => 'HP Inc.', 'domains' => ['hp.com']]);
+        $go = $this->createBrand(['name' => 'Go', 'domains' => ['go.dev']]);
+
+        expect(NoiseFilter::isOwnName($this->brand, 'nintendo co.'))->toBeTrue()
+            ->and(NoiseFilter::isOwnName($this->brand, 'Sony vs Nintendo'))->toBeFalse()
+            ->and(NoiseFilter::isOwnName($hp, 'HP Envy'))->toBeTrue()
+            ->and(NoiseFilter::isOwnName($hp, 'Hpe Aruba'))->toBeFalse()
+            ->and(NoiseFilter::isOwnName($go, 'Go'))->toBeTrue()
+            ->and(NoiseFilter::isOwnName($go, 'Go Daddy'))->toBeFalse();
+    });
+
+    it('lets the platform list be replaced in the config', function () {
+        config(['ai-visibility.discovery.platform_domains' => ['Reddit.com']]);
+
+        expect(NoiseFilter::platformDomains())->toBe(['reddit.com']);
+
+        app(Discovery::class)->discover($this->brand);
+
+        expect(Candidate::query()->pluck('name')->all())->toContain('YouTube', 'G2', 'github.com')
+            ->not->toContain('Reddit');
+    });
+
+    it('keeps platforms the brand competes with', function () {
+        app(Settings::class)->set(['discovery' => ['allow_platforms' => ['https://github.com']]]);
+        $this->brand->competitors()->create(['name' => 'YouTube', 'domains' => ['youtube.com']]);
+
+        expect(NoiseFilter::platformDomains($this->brand))->not->toContain('github.com', 'youtube.com')
+            ->toContain('reddit.com');
+
+        app(Discovery::class)->discover($this->brand);
+
+        expect(Candidate::query()->pluck('name')->all())->toContain('github.com')
+            ->not->toContain('Reddit', 'YouTube');
     });
 
     it('does not store the brand\'s own products as names', function () {
@@ -580,6 +665,85 @@ describe('robustness', function () {
         app(Discovery::class)->discover($this->brand);
 
         expect(Candidate::query()->where('key', 'domain:globex.io')->value('status'))->toBe(Candidate::STATUS_IGNORED);
+    });
+
+    it('never reopens a candidate the user decided on while it was being classified', function () {
+        app(Discovery::class)->discover($this->brand);
+        $globex = Candidate::query()->where('domain', 'globex.io')->first();
+        $stale = Candidate::query()->find($globex->id);
+        $competitor = app(CandidateActions::class)->accept($globex);
+
+        Http::fake([
+            'api.openai.com/*' => helperReply(['results' => [['key' => "c{$globex->id}", 'label' => 'review_comparison', 'confidence' => 'high']]]),
+            '*' => Http::response('', 404),
+        ]);
+
+        expect(app(Classifier::class)->classify($this->brand, collect([$stale])))->toBe(0);
+
+        expect($globex->fresh()->status)->toBe(Candidate::STATUS_ACCEPTED)
+            ->and(app(CandidateActions::class)->accept($stale)->id)->toBe($competitor->id)
+            ->and($this->brand->competitors()->where('source', 'discovered')->count())->toBe(1);
+    });
+
+    it('does not classify decided candidates from the queue', function () {
+        app(Discovery::class)->discover($this->brand);
+        $globex = Candidate::query()->where('domain', 'globex.io')->first();
+        app(CandidateActions::class)->ignore($globex);
+        Http::fake();
+
+        app()->call([new ClassifyCandidatesJob($this->brand->id, $this->brand->tenant_id, [$globex->id]), 'handle']);
+
+        Http::assertNothingSent();
+        expect($globex->fresh()->status)->toBe(Candidate::STATUS_IGNORED);
+    });
+
+    it('tracks the same competitor again after reopening', function () {
+        app(Discovery::class)->discover($this->brand);
+        $globex = Candidate::query()->where('domain', 'globex.io')->first();
+
+        $first = app(CandidateActions::class)->accept($globex);
+        app(CandidateActions::class)->reopen($globex->fresh());
+        $second = app(CandidateActions::class)->accept($globex->fresh());
+
+        expect($second->id)->toBe($first->id)
+            ->and($this->brand->competitors()->where('source', 'discovered')->count())->toBe(1)
+            ->and($globex->fresh()->status)->toBe(Candidate::STATUS_ACCEPTED);
+    });
+
+    it('takes over keys stored before accents were folded', function () {
+        $result = Result::query()->first();
+        $result->mentions()->create(['subject_type' => 'entity', 'name_matched' => 'Pokémon', 'position' => 1, 'count' => 1]);
+        $result->mentions()->create(['subject_type' => 'entity', 'name_matched' => 'Café Inc', 'position' => 2, 'count' => 1]);
+
+        // Stored by an older version: the accented key, plus a duplicate under the folded one.
+        $old = Candidate::query()->create(['brand_id' => $this->brand->id, 'key' => 'name:pokémon', 'kind' => 'name', 'name' => 'Pokémon', 'status' => Candidate::STATUS_REJECTED, 'score' => 50]);
+        $cafe = Candidate::query()->create(['brand_id' => $this->brand->id, 'key' => 'name:café inc', 'kind' => 'name', 'name' => 'Café Inc', 'status' => Candidate::STATUS_CLASSIFIED, 'score' => 50, 'label' => CompetitorLabel::DirectCompetitor]);
+        $duplicate = Candidate::query()->create(['brand_id' => $this->brand->id, 'key' => 'name:pokemon', 'kind' => 'name', 'name' => 'Pokemon', 'status' => Candidate::STATUS_NEW, 'score' => 10]);
+        $duplicate->classifications()->create(['label' => CompetitorLabel::DirectCompetitor, 'confidence' => 'low']);
+
+        app(Discovery::class)->discover($this->brand);
+
+        expect($old->fresh()->key)->toBe('name:pokemon')
+            ->and($old->fresh()->status)->toBe(Candidate::STATUS_REJECTED)
+            ->and($old->classifications()->count())->toBe(1)
+            ->and(Candidate::query()->find($duplicate->id))->toBeNull()
+            ->and($cafe->fresh()->key)->toBe('name:cafe inc')
+            ->and($cafe->fresh()->score)->toBeGreaterThan(0);
+    });
+
+    it('lets only one competitor job per brand run at a time, and never blocks for ever', function () {
+        $classify = new ClassifyCandidatesJob($this->brand->id, 'team', [1]);
+        $discover = new DiscoverCompetitorsJob($this->brand->id, 'team');
+
+        expect($classify->middleware()[0]->getLockKey($classify))->toBe($discover->middleware()[0]->getLockKey($discover))
+            ->and($discover->uniqueFor())->toBeGreaterThan(0);
+
+        Queue::fake();
+
+        expect(DiscoverCompetitorsJob::queueFor($this->brand->id, null))->toBeTrue()
+            ->and(DiscoverCompetitorsJob::queueFor($this->brand->id, null))->toBeFalse();
+
+        Queue::assertPushed(DiscoverCompetitorsJob::class, 1);
     });
 
     it('discovers from every unprocessed answer, not only the run that queued it', function () {

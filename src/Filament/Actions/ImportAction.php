@@ -32,7 +32,7 @@ class ImportAction
         return Action::make('addPrompts')
             ->label('Add prompts')
             ->icon('heroicon-o-plus')
-            ->modalDescription('Paste one prompt per line, or upload a CSV with a "text" or "prompt" column (optional columns: topic, intent, tags). Duplicates are skipped.')
+            ->modalDescription('Paste one prompt per line, or upload a CSV with a "text" or "prompt" column (optional columns: topic, intent, status, tags). Duplicates are skipped.')
             ->schema([
                 ...static::brandField($brand),
                 static::inputTabs('text', "What is the best CRM for small agencies?\nWhich CRM integrates with Slack?"),
@@ -56,6 +56,8 @@ class ImportAction
 
                 $invalid = $result['invalid'] ?? 0;
                 $truncated = $result['truncated'] ?? 0;
+                $overLimit = $result['over_limit'] ?? 0;
+                $maxRows = Importer::maxImportRows();
 
                 Notification::make()
                     ->title("Added {$result['created']} prompts")
@@ -64,8 +66,9 @@ class ImportAction
                         $result['paused'] ? "{$result['paused']} saved as paused (active-prompt limit)." : null,
                         $invalid ? "{$invalid} rows could not be read (unsupported text encoding)." : null,
                         $truncated ? "{$truncated} topic names were shortened to 255 characters." : null,
+                        $overLimit ? "Only the first {$maxRows} rows were read; {$overLimit} more were left out. Split the file to import the rest." : null,
                     ])->filter()->implode(' ') ?: null)
-                    ->status($result['paused'] || $invalid ? 'warning' : 'success')
+                    ->status($result['paused'] || $invalid || $overLimit ? 'warning' : 'success')
                     ->send();
             });
     }
@@ -94,6 +97,7 @@ class ImportAction
 
                 $tooLong = $result['too_long'] ?? 0;
                 $invalid = $result['invalid'] ?? 0;
+                $overLimit = $result['over_limit'] ?? 0;
 
                 Notification::make()
                     ->title("Added {$result['created']} keywords")
@@ -101,8 +105,9 @@ class ImportAction
                         $result['skipped'] ? "{$result['skipped']} duplicates skipped." : null,
                         $tooLong ? "{$tooLong} keywords longer than 255 characters skipped." : null,
                         $invalid ? "{$invalid} rows could not be read (unsupported text encoding)." : null,
+                        $overLimit ? "Only the first {$result['created']} new keywords were imported because of the keyword limit; {$overLimit} were left out." : null,
                     ])->filter()->implode(' ') ?: null)
-                    ->status($tooLong || $invalid ? 'warning' : 'success')
+                    ->status($tooLong || $invalid || $overLimit ? 'warning' : 'success')
                     ->send();
             });
     }
@@ -125,7 +130,7 @@ class ImportAction
 
             Notification::make()
                 ->title('Import failed')
-                ->body('Nothing was imported. Check the file is a CSV saved as UTF-8 or Windows-1252, then try again.')
+                ->body('Nothing was imported. Check the file is a CSV (comma, semicolon or tab separated), then try again.')
                 ->danger()
                 ->persistent()
                 ->send();

@@ -73,8 +73,10 @@ class ProbeCommand extends Command
                 continue;
             }
 
-            // The key itself is now the problem: that needs a person, not another probe.
-            if ($result->reason && ! $result->reason->resumesAutomatically()) {
+            // The engine now fails for another reason (e.g. out of credits instead of an
+            // outage, or a key problem that needs a person): pause it for that reason,
+            // with that reason's own schedule.
+            if ($result->reason && $result->reason !== $state->reason) {
                 $engines->pause($engine, $result->reason, $result->message);
                 $this->components->warn("{$engine}: paused ({$result->reason->getLabel()}).");
 
