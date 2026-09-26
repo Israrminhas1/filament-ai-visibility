@@ -12,6 +12,7 @@ use IsrarMinhas\FilamentAiVisibility\Commands\HealthCommand;
 use IsrarMinhas\FilamentAiVisibility\Commands\InstallCommand;
 use IsrarMinhas\FilamentAiVisibility\Commands\ProbeCommand;
 use IsrarMinhas\FilamentAiVisibility\Commands\RunCommand;
+use IsrarMinhas\FilamentAiVisibility\Commands\SyncKeywordsCommand;
 use IsrarMinhas\FilamentAiVisibility\Engines\Drivers\AnthropicEngine;
 use IsrarMinhas\FilamentAiVisibility\Engines\Drivers\GeminiEngine;
 use IsrarMinhas\FilamentAiVisibility\Engines\Drivers\GrokEngine;
@@ -26,6 +27,10 @@ use IsrarMinhas\FilamentAiVisibility\Events\RunCompleted;
 use IsrarMinhas\FilamentAiVisibility\Jobs\DiscoverCompetitorsJob;
 use IsrarMinhas\FilamentAiVisibility\Support\Tenancy;
 use IsrarMinhas\FilamentAiVisibility\Jobs\QueueHeartbeat;
+use IsrarMinhas\FilamentAiVisibility\Keywords\KeywordSourceRegistry;
+use IsrarMinhas\FilamentAiVisibility\Keywords\Sources\DataForSeoKeywords;
+use IsrarMinhas\FilamentAiVisibility\Keywords\Sources\GoogleSearchConsole;
+use IsrarMinhas\FilamentAiVisibility\Keywords\Sources\SerpApiPeopleAlsoAsk;
 use IsrarMinhas\FilamentAiVisibility\Listeners\SendEngineAlerts;
 use IsrarMinhas\FilamentAiVisibility\Models\Heartbeat;
 use IsrarMinhas\FilamentAiVisibility\Reports\Metrics;
@@ -60,6 +65,7 @@ class AiVisibilityServiceProvider extends PackageServiceProvider
                 'create_ai_visibility_tracking_tables',
                 'create_ai_visibility_competitor_tables',
                 'add_ai_visibility_analysis_columns',
+                'create_ai_visibility_connections_table',
             ])
             ->hasCommands([
                 InstallCommand::class,
@@ -68,6 +74,7 @@ class AiVisibilityServiceProvider extends PackageServiceProvider
                 RunCommand::class,
                 ProbeCommand::class,
                 DiscoverCommand::class,
+                SyncKeywordsCommand::class,
             ]);
     }
 
@@ -78,6 +85,16 @@ class AiVisibilityServiceProvider extends PackageServiceProvider
 
             foreach ([OpenAiEngine::class, AnthropicEngine::class, GeminiEngine::class, GrokEngine::class, PerplexityEngine::class] as $engine) {
                 $registry->register($engine);
+            }
+
+            return $registry;
+        });
+
+        $this->app->singleton(KeywordSourceRegistry::class, function () {
+            $registry = new KeywordSourceRegistry;
+
+            foreach ([SerpApiPeopleAlsoAsk::class, GoogleSearchConsole::class, DataForSeoKeywords::class] as $source) {
+                $registry->register($source);
             }
 
             return $registry;
@@ -118,6 +135,7 @@ class AiVisibilityServiceProvider extends PackageServiceProvider
             Filament\Widgets\BrandPerception::class,
             Filament\Widgets\HeadToHead::class,
             Filament\Widgets\Opportunities::class,
+            Filament\Widgets\TopicPerformance::class,
         ] as $widget) {
             Livewire::component('ai-visibility.' . str(class_basename($widget))->kebab(), $widget);
         }
@@ -157,6 +175,10 @@ class AiVisibilityServiceProvider extends PackageServiceProvider
             $schedule->command('ai-visibility:discover --queue')
                 ->dailyAt('04:30')
                 ->name('ai-visibility:discover');
+
+            $schedule->command('ai-visibility:sync-keywords')
+                ->dailyAt('05:00')
+                ->name('ai-visibility:sync-keywords');
 
             $schedule->command('ai-visibility:probe')
                 ->everyFiveMinutes()

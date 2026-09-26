@@ -1,5 +1,14 @@
 # Changelog
 
+## Unreleased — Milestone 6 (keywords, generation, topics)
+
+- Keyword sources: SerpAPI "People also ask", Google Search Console (service account) and DataForSEO, with tests, scheduled syncs, keyword limits, failure states and one-time alerts. Custom sources via `->keywordSource()`.
+- Keyword-grounded prompt generation with rule checks and optional AI quality review; suggestions saved for review, rejected ideas kept with reasons; prompts linked to their keywords.
+- "Generate with AI" in the setup wizard; generation from the Prompts screen, a brand, or selected keywords.
+- Topic grouping with review before applying; Topics report.
+- Search-weighted reach on the Overview.
+- Brand markets like "UK" now map to the correct country code (GB).
+
 ## Unreleased — Milestone 5 (analysis and competitor reports)
 
 - Answer analysis: sentiment (with score), recommendation strength and descriptors for every detected brand and competitor mention; also collects other company names, replacing the separate extraction call.

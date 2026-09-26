@@ -16,12 +16,21 @@ class Instructions
 
     public const ANALYSIS = 'analysis';
 
+    public const GENERATION = 'generation';
+
+    public const QUALITY_REVIEW = 'quality_review';
+
+    public const TOPICS = 'topics';
+
     /**
      * @return array<string, string>
      */
     public static function labels(): array
     {
         return [
+            self::GENERATION => 'Prompt generation',
+            self::QUALITY_REVIEW => 'Prompt quality review',
+            self::TOPICS => 'Topic grouping',
             self::ANALYSIS => 'Answer analysis',
             self::CLASSIFICATION => 'Competitor classification',
             self::EXTRACTION => 'Name extraction',
@@ -35,6 +44,9 @@ class Instructions
     public static function placeholders(): array
     {
         return [
+            self::GENERATION => ['brand', 'domain', 'description', 'industry', 'market', 'persona', 'competitors', 'keywords', 'count', 'topic', 'intents', 'existing_prompts'],
+            self::QUALITY_REVIEW => ['brand', 'description', 'market', 'prompts'],
+            self::TOPICS => ['brand', 'description', 'prompts'],
             self::ANALYSIS => ['brand', 'competitors', 'answers'],
             self::CLASSIFICATION => ['brand', 'domain', 'description', 'industry', 'market', 'competitors', 'labels', 'examples', 'candidates'],
             self::EXTRACTION => ['brand', 'answers'],
@@ -94,6 +106,64 @@ class Instructions
 
                 Return JSON: {"results": [{"key": "...", "label": "one of the label keys", "confidence": "high|medium|low", "company_name": "...", "offering_summary": "one sentence on what it offers", "reason": "one sentence on why this label"}]}
                 Include every candidate exactly once, using its key.
+                TEXT,
+
+            self::GENERATION => <<<'TEXT'
+                Write {count} questions that real customers would type into an AI assistant (ChatGPT, Claude, Gemini, Perplexity) when looking for what this brand offers. They are used to track whether AI assistants recommend the brand.
+
+                Brand: {brand} ({domain})
+                What it offers: {description}
+                Industry: {industry}
+                Market: {market}
+                Customer persona: {persona}
+                Competitors: {competitors}
+                Topic to focus on: {topic}
+
+                Intents to cover (spread the questions across them):
+                {intents}
+
+                Ground the questions in these real search keywords where given. Turn short keywords into the natural, specific questions people ask an assistant; note which keyword each question came from:
+                {keywords}
+
+                Rules:
+                - Do NOT mention {brand} (except for the "branded" intent).
+                - Write like a real person: specific needs, context and constraints ("for a 10-person agency", "under $50 a month").
+                - One question per item; no numbering; no duplicates of each other or of these existing prompts:
+                {existing_prompts}
+
+                Return JSON: {"prompts": [{"text": "...", "intent": "discovery|comparison|alternatives|problem|branded", "keyword": "the source keyword or null"}]}
+                TEXT,
+
+            self::QUALITY_REVIEW => <<<'TEXT'
+                You review candidate prompts for tracking a brand's visibility in AI assistants.
+
+                Brand: {brand}
+                What it offers: {description}
+                Market: {market}
+
+                Score each prompt from 1 to 5:
+                5 = a question a real customer would very likely ask an AI assistant, and the answer would naturally include companies like this brand
+                4 = realistic and relevant
+                3 = plausible but vague, unnatural or only loosely relevant
+                2 = unlikely to be asked, or answers would not involve companies like this brand
+                1 = unusable (not a question, off-topic, nonsensical, or names the brand when it should not)
+
+                {prompts}
+
+                Return JSON: {"reviews": [{"id": 1, "score": 4, "reason": "one short sentence"}]}
+                TEXT,
+
+            self::TOPICS => <<<'TEXT'
+                Group these prompts, which track a brand's visibility in AI assistants, into 3 to 12 topics that a marketer would recognise (e.g. "Pricing", "Integrations", "Alternatives to X", "For agencies").
+
+                Brand: {brand}
+                What it offers: {description}
+
+                {prompts}
+
+                Every prompt must be in exactly one topic. Topic names are short (1–4 words).
+
+                Return JSON: {"topics": [{"name": "...", "description": "one short sentence", "prompt_ids": [1, 2]}]}
                 TEXT,
 
             self::ANALYSIS => <<<'TEXT'

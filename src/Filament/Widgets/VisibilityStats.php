@@ -18,7 +18,7 @@ class VisibilityStats extends StatsOverviewWidget
 
     protected function getColumns(): int | array
     {
-        return ['md' => 3, 'xl' => 5];
+        return ['md' => 3, 'xl' => 6];
     }
 
     protected function getStats(): array
@@ -44,6 +44,28 @@ class VisibilityStats extends StatsOverviewWidget
                 ->description('$' . number_format($now['spend'], 2) . ' spent')
                 ->descriptionIcon('heroicon-m-banknotes')
                 ->color('gray'),
+            ...$this->reachStat($filters),
+        ];
+    }
+
+    /**
+     * Only shown when prompts are linked to keywords with search demand.
+     *
+     * @return array<Stat>
+     */
+    protected function reachStat(\IsrarMinhas\FilamentAiVisibility\Reports\ReportFilters $filters): array
+    {
+        $reach = $this->metrics()->reach($filters);
+
+        if ($reach === null) {
+            return [];
+        }
+
+        return [
+            Stat::make('Search-weighted reach', $reach['reach'] . '%')
+                ->description('Visibility weighted by the search demand of ' . $reach['prompts'] . ' keyword-linked prompts')
+                ->descriptionIcon('heroicon-m-magnifying-glass')
+                ->color('info'),
         ];
     }
 

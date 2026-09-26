@@ -8,6 +8,7 @@ use Filament\Actions\EditAction;
 use Filament\Resources\RelationManagers\RelationManager;
 use Filament\Schemas\Schema;
 use Filament\Tables\Table;
+use IsrarMinhas\FilamentAiVisibility\Filament\Actions\GeneratePromptsAction;
 use IsrarMinhas\FilamentAiVisibility\Filament\Actions\ImportAction;
 use IsrarMinhas\FilamentAiVisibility\Filament\Concerns\HandlesLimitExceptions;
 use IsrarMinhas\FilamentAiVisibility\Filament\Forms\PromptForm;
@@ -41,6 +42,7 @@ class PromptsRelationManager extends RelationManager
             ->columns(PromptTable::columns())
             ->filters(PromptTable::filters())
             ->headerActions([
+                GeneratePromptsAction::make(fn () => $this->getOwnerRecord()),
                 ImportAction::prompts(fn () => $this->getOwnerRecord()),
                 CreateAction::make()->label('New prompt'),
             ])

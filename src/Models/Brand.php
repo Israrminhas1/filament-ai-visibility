@@ -87,11 +87,12 @@ class Brand extends Model
     {
         $market = trim((string) $this->market);
 
-        if (preg_match('/^[A-Za-z]{2}$/', $market)) {
-            return strtoupper($market);
+        // Known names first, so "UK" becomes the ISO code "GB".
+        if ($code = config('ai-visibility.markets.' . strtolower($market))) {
+            return $code;
         }
 
-        return config('ai-visibility.markets.' . strtolower($market));
+        return preg_match('/^[A-Za-z]{2}$/', $market) ? strtoupper($market) : null;
     }
 
     /**

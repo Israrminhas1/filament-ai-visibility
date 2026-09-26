@@ -338,7 +338,21 @@ return [
         'analysis' => [
             'enabled' => true,
         ],
+        'keywords' => [
+            'sync_days' => 30,
+        ],
+        'generation' => [
+            'count' => 10,
+            'intents' => ['discovery', 'comparison', 'alternatives', 'problem'],
+            'persona' => null,
+            'ai_review' => true,
+            'min_quality' => 4,
+            'prompts_per_keyword' => 2,
+        ],
         'instructions' => [
+            'generation' => null,
+            'quality_review' => null,
+            'topics' => null,
             'analysis' => null,
             'classification' => null,
             'extraction' => null,

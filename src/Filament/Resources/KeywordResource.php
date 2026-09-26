@@ -14,6 +14,7 @@ use Filament\Tables\Filters\TernaryFilter;
 use Filament\Tables\Table;
 use Illuminate\Database\Eloquent\Collection;
 use IsrarMinhas\FilamentAiVisibility\Enums\KeywordSource;
+use IsrarMinhas\FilamentAiVisibility\Filament\Actions\GeneratePromptsAction;
 use IsrarMinhas\FilamentAiVisibility\Filament\Concerns\HasAiVisibilityNavigation;
 use IsrarMinhas\FilamentAiVisibility\Filament\Resources\KeywordResource\Pages;
 use IsrarMinhas\FilamentAiVisibility\Models\Keyword;
@@ -65,6 +66,7 @@ class KeywordResource extends Resource
             ])
             ->toolbarActions([
                 BulkActionGroup::make([
+                    GeneratePromptsAction::fromKeywords(),
                     BulkAction::make('ignore')
                         ->label('Ignore')
                         ->icon('heroicon-o-eye-slash')

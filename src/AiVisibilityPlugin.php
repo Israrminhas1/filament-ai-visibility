@@ -14,9 +14,13 @@ use IsrarMinhas\FilamentAiVisibility\Filament\Pages\OpportunitiesReport;
 use IsrarMinhas\FilamentAiVisibility\Filament\Pages\ManageSettings;
 use IsrarMinhas\FilamentAiVisibility\Filament\Pages\Overview;
 use IsrarMinhas\FilamentAiVisibility\Filament\Pages\SourcesReport;
+use IsrarMinhas\FilamentAiVisibility\Filament\Pages\TopicsReport;
+use IsrarMinhas\FilamentAiVisibility\Keywords\Contracts\KeywordSource;
+use IsrarMinhas\FilamentAiVisibility\Keywords\KeywordSourceRegistry;
 use IsrarMinhas\FilamentAiVisibility\Filament\Pages\Setup;
 use IsrarMinhas\FilamentAiVisibility\Filament\Resources\BrandResource;
 use IsrarMinhas\FilamentAiVisibility\Filament\Resources\CandidateResource;
+use IsrarMinhas\FilamentAiVisibility\Filament\Resources\ConnectionResource;
 use IsrarMinhas\FilamentAiVisibility\Filament\Resources\KeywordResource;
 use IsrarMinhas\FilamentAiVisibility\Filament\Resources\PromptResource;
 use IsrarMinhas\FilamentAiVisibility\Filament\Resources\ResultResource;
@@ -43,6 +47,8 @@ class AiVisibilityPlugin implements Plugin
         'discovered' => true,
         'prompts' => true,
         'keywords' => true,
+        'keywordSources' => true,
+        'topics' => true,
         'runs' => true,
         'answers' => true,
         'settings' => true,
@@ -58,6 +64,11 @@ class AiVisibilityPlugin implements Plugin
      * @var array<string>
      */
     protected array $removedEngines = [];
+
+    /**
+     * @var array<class-string<KeywordSource>|KeywordSource>
+     */
+    protected array $keywordSources = [];
 
     public static function make(): static
     {
@@ -208,6 +219,28 @@ class AiVisibilityPlugin implements Plugin
         return $this;
     }
 
+    /**
+     * Register an additional keyword source.
+     *
+     * @param  class-string<KeywordSource>|KeywordSource  $source
+     */
+    public function keywordSource(string | KeywordSource $source): static
+    {
+        $this->keywordSources[] = $source;
+
+        return $this;
+    }
+
+    public function keywordSourcesScreen(bool $condition = true): static
+    {
+        return $this->screen('keywordSources', $condition);
+    }
+
+    public function topicsReport(bool $condition = true): static
+    {
+        return $this->screen('topics', $condition);
+    }
+
     public function withoutEngine(string $key): static
     {
         $this->removedEngines[] = $key;
@@ -222,6 +255,7 @@ class AiVisibilityPlugin implements Plugin
             CandidateResource::class => $this->screens['discovered'],
             PromptResource::class => $this->screens['prompts'],
             KeywordResource::class => $this->screens['keywords'],
+            ConnectionResource::class => $this->screens['keywordSources'],
             RunResource::class => $this->screens['runs'],
             ResultResource::class => $this->screens['answers'],
         ]));
@@ -233,6 +267,7 @@ class AiVisibilityPlugin implements Plugin
             CompetitorsReport::class => $this->screens['competitorReports'],
             HeadToHeadReport::class => $this->screens['competitorReports'],
             OpportunitiesReport::class => $this->screens['competitorReports'],
+            TopicsReport::class => $this->screens['topics'],
             ManageSettings::class => $this->screens['settings'],
             Health::class => $this->screens['health'],
         ]));
@@ -253,6 +288,10 @@ class AiVisibilityPlugin implements Plugin
 
         foreach ($this->removedEngines as $key) {
             $registry->forget($key);
+        }
+
+        foreach ($this->keywordSources as $source) {
+            app(KeywordSourceRegistry::class)->register($source);
         }
     }
 

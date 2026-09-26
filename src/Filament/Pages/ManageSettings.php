@@ -20,6 +20,7 @@ use Filament\Schemas\Components\Tabs;
 use Filament\Schemas\Components\Tabs\Tab;
 use Filament\Schemas\Schema;
 use Filament\Support\Enums\Alignment;
+use IsrarMinhas\FilamentAiVisibility\Enums\PromptIntent;
 use IsrarMinhas\FilamentAiVisibility\Enums\RunFrequency;
 use IsrarMinhas\FilamentAiVisibility\Engines\EngineRegistry;
 use IsrarMinhas\FilamentAiVisibility\Filament\Concerns\HasAiVisibilityNavigation;
@@ -186,6 +187,26 @@ class ManageSettings extends Page
                                 ->placeholder('example.com'),
                         ]),
 
+                    Tab::make('Prompts & keywords')
+                        ->icon('heroicon-o-light-bulb')
+                        ->schema([
+                            Section::make('Prompt generation')
+                                ->columns(2)
+                                ->schema([
+                                    TextInput::make('generation.count')->label('Prompts per request')->numeric()->minValue(1)->maxValue(50),
+                                    TextInput::make('generation.persona')->label('Default persona')->placeholder('e.g. owner of a small agency'),
+                                    CheckboxList::make('generation.intents')->label('Default intents')->options(PromptIntent::class)->columns(3)->columnSpanFull(),
+                                    Toggle::make('generation.ai_review')
+                                        ->label('Review generated prompts with AI')
+                                        ->helperText('Scores each prompt for realism and relevance; weak ones are rejected. One extra helper call per batch.'),
+                                    TextInput::make('generation.min_quality')->label('Minimum quality (1–5)')->numeric()->minValue(1)->maxValue(5),
+                                ]),
+                            TextInput::make('keywords.sync_days')
+                                ->label('Sync keyword sources every (days)')
+                                ->numeric()
+                                ->minValue(1),
+                        ]),
+
                     Tab::make('AI instructions')
                         ->icon('heroicon-o-document-text')
                         ->schema(collect(Instructions::labels())->map(fn (string $label, string $key) => Textarea::make("instructions.{$key}")
@@ -295,6 +316,14 @@ class ManageSettings extends Page
             ],
             'data' => $state['data'] ?? [],
             'analysis' => ['enabled' => (bool) ($state['analysis']['enabled'] ?? true)],
+            'generation' => [
+                'count' => (int) ($state['generation']['count'] ?? 10),
+                'persona' => $state['generation']['persona'] ?? null,
+                'intents' => array_values(array_map(fn ($i) => $i instanceof PromptIntent ? $i->value : $i, (array) ($state['generation']['intents'] ?? []))),
+                'ai_review' => (bool) ($state['generation']['ai_review'] ?? true),
+                'min_quality' => (int) ($state['generation']['min_quality'] ?? 4),
+            ],
+            'keywords' => ['sync_days' => (int) ($state['keywords']['sync_days'] ?? 30)],
             'discovery' => [
                 'enabled' => (bool) ($state['discovery']['enabled'] ?? true),
                 'extract_names' => (bool) ($state['discovery']['extract_names'] ?? true),

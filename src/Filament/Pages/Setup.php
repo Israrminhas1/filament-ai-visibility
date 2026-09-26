@@ -27,6 +27,7 @@ use Illuminate\Support\Facades\Blade;
 use Illuminate\Support\HtmlString;
 use IsrarMinhas\FilamentAiVisibility\AiVisibilityPlugin;
 use IsrarMinhas\FilamentAiVisibility\Competitors\CompetitorSuggester;
+use IsrarMinhas\FilamentAiVisibility\Prompts\PromptGenerator;
 use IsrarMinhas\FilamentAiVisibility\Exceptions\HelperUnavailable;
 use IsrarMinhas\FilamentAiVisibility\Engines\EngineManager;
 use IsrarMinhas\FilamentAiVisibility\Engines\EngineRegistry;
@@ -515,6 +516,33 @@ class Setup extends Page
             });
     }
 
+    /**
+     * Fill the prompt box with AI-written questions (based on the keywords, if any) for review.
+     */
+    protected function generatePrompts(Get $get, Set $set): void
+    {
+        $brand = $this->brand();
+
+        try {
+            $result = app(PromptGenerator::class)->generate($brand, save: false);
+        } catch (HelperUnavailable $e) {
+            Notification::make()->title('Could not generate prompts')->body($e->getMessage())->warning()->send();
+
+            return;
+        }
+
+        $good = $result['candidates']->where('passed', true)->pluck('text');
+        $lines = collect(Importer::lines($get('prompts_text')))->merge($good)->unique()->implode("\n");
+
+        $set('prompts_text', $lines);
+
+        Notification::make()
+            ->title("Added {$good->count()} questions")
+            ->body('Edit or delete any you don\'t want, then continue.' . ($result['candidates']->where('passed', false)->count() ? ' Weak ideas were left out.' : ''))
+            ->success()
+            ->send();
+    }
+
     protected function promptsStep(): Step
     {
         return Step::make('Prompts')
@@ -522,6 +550,13 @@ class Setup extends Page
             ->description('Questions to track')
             ->schema([
                 Text::make(fn () => 'Write the questions your customers ask AI assistants, one per line. Don\'t include your brand name. ' . $this->promptCountText()),
+                Actions::make([
+                    Action::make('generatePrompts')
+                        ->label('Generate with AI')
+                        ->icon('heroicon-o-sparkles')
+                        ->color('gray')
+                        ->action(fn (Get $get, Set $set) => $this->generatePrompts($get, $set)),
+                ])->key('promptActions'),
                 Textarea::make('prompts_text')
                     ->hiddenLabel()
                     ->rows(10)

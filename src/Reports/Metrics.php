@@ -282,6 +282,70 @@ class Metrics
             ]]);
     }
 
+    /**
+     * Visibility weighted by the search demand behind each prompt (its keywords'
+     * monthly searches, or Search Console impressions), so winning a popular
+     * question counts more than winning a rare one. Null without keyword data.
+     *
+     * @return array{reach: float, demand: int, prompts: int}|null
+     */
+    public function reach(ReportFilters $filters): ?array
+    {
+        $visibility = $this->promptVisibility($filters);
+
+        if ($visibility->isEmpty()) {
+            return null;
+        }
+
+        $demand = DB::table(Model::prefixedTable('keyword_prompt') . ' as kp')
+            ->join(Model::prefixedTable('keywords') . ' as k', 'k.id', '=', 'kp.keyword_id')
+            ->whereIn('kp.prompt_id', $visibility->keys())
+            ->groupBy('kp.prompt_id')
+            ->selectRaw('kp.prompt_id, SUM(COALESCE(k.search_volume, k.impressions, 0)) as demand')
+            ->pluck('demand', 'prompt_id')
+            ->map(fn ($value) => (int) $value)
+            ->filter();
+
+        $total = $demand->sum();
+
+        if ($total === 0) {
+            return null;
+        }
+
+        $weighted = $demand->reduce(fn ($carry, $value, $promptId) => $carry + $value * ($visibility[$promptId]['visibility'] ?? 0), 0);
+
+        return ['reach' => round($weighted / $total, 1), 'demand' => $total, 'prompts' => $demand->count()];
+    }
+
+    /**
+     * Visibility and change per topic, weakest first.
+     *
+     * @return Collection<int, array{topic_id: ?int, name: string, prompts: int, answers: int, visibility: ?float, change: ?float, share_of_voice: ?float}>
+     */
+    public function topics(ReportFilters $filters): Collection
+    {
+        $topics = $filters->brand->topics()->withCount('prompts')->orderBy('name')->get();
+
+        return $topics
+            ->map(function ($topic) use ($filters) {
+                $scoped = new ReportFilters($filters->brand, $filters->from, $filters->until, $filters->engine, $topic->getKey());
+                $now = $this->summary($scoped);
+                $before = $this->summary($scoped->previous());
+
+                return [
+                    'topic_id' => $topic->getKey(),
+                    'name' => $topic->name,
+                    'prompts' => $topic->prompts_count,
+                    'answers' => $now['answers'],
+                    'visibility' => $now['visibility'],
+                    'change' => $now['visibility'] !== null && $before['visibility'] !== null ? round($now['visibility'] - $before['visibility'], 1) : null,
+                    'share_of_voice' => $now['share_of_voice'],
+                ];
+            })
+            ->sortBy(fn ($row) => $row['visibility'] ?? 101)
+            ->values();
+    }
+
     protected function dateExpression(): string
     {
         return DB::connection((new Result)->getConnectionName())->getDriverName() === 'sqlsrv'

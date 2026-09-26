@@ -2,7 +2,7 @@
 
 Track how your brand shows up in answers from ChatGPT, Claude, Gemini, Perplexity and Grok — with competitor intelligence, inside your own Filament panel. Bring your own API keys; one key is enough to start.
 
-> **Status: in development (Milestone 5 of 8).** Setup, engines, brands, prompts, keywords, settings, health monitoring, tracking runs, reports, competitor intelligence and **answer analysis with competitor reports** work. Prompt generation, topics and alert rules land in the next milestones. See [`docs/SPEC.md`](docs/SPEC.md) for the full plan.
+> **Status: in development (Milestone 6 of 8).** Setup, engines, brands, prompts, keywords, settings, health monitoring, tracking runs, reports, competitor intelligence, answer analysis, competitor reports and **keyword-grounded prompt generation with topics** work. Alert rules and scheduled reports land next. See [`docs/SPEC.md`](docs/SPEC.md) for the full plan.
 
 ## Requirements
 
@@ -100,6 +100,27 @@ Before a run starts, it's refused (with the reason) if setup is unfinished, "Pau
 
 Only successful answers count in reports. Answers skipped because an engine was paused are left out, and charts show those days as gaps rather than a drop to zero.
 
+## Keywords and prompt generation
+
+Prompts are only as good as the questions behind them, so generation is grounded in real search demand where possible.
+
+**Keyword sources** (Keyword sources screen), all optional:
+
+| Source | What it gives you | Notes |
+|---|---|---|
+| Manual / CSV | Keywords you paste or upload | Keywords screen |
+| SerpAPI "People also ask" | Real question phrasings and related searches for your keywords | One SerpAPI search per seed keyword |
+| Google Search Console | Your site's real queries, with clicks and impressions (90 days) | Free. Create a Google Cloud service account, enable the Search Console API, paste its JSON key, and add its email as a user of your property |
+| DataForSEO | Keywords your site ranks for, with search volume | Pay as you go |
+
+Each source can be tested and synced on demand, and syncs automatically (monthly by default). A failing source is marked (with the error), sends one alert, and retries the next day. Queries containing your brand name are flagged as branded and aren't used for discovery prompts.
+
+**Generate prompts** (Prompts screen, a brand, the setup wizard, or selected keywords) writes realistic questions across the intents you choose (discovery, comparison, alternatives, problem solving, branded), for a persona and topic if you like. Weak ideas are filtered out first by rules (too short or long, not a question, names the brand, near-duplicate of an existing prompt), then by an optional AI review scoring realism and relevance 1–5. Good prompts are saved as **Suggested** for you to activate. Filtered ones are kept as **Rejected** with the reason. Each prompt remembers the keywords it came from.
+
+**Organise into topics** (on a brand) proposes 3–12 topics for its prompts. You can rename or remove them before applying. The **Topics** report shows visibility per topic, weakest first.
+
+When prompts are linked to keywords with search volume or impressions, the Overview adds **search-weighted reach**: visibility weighted by the demand behind each prompt, so winning a popular question counts more than winning a rare one.
+
 ## Answer analysis
 
 After each run, answers are analysed in small batches (one AI helper call per ~5 answers). For every tracked brand an answer mentions, it records:
@@ -181,6 +202,7 @@ AiVisibilityPlugin::make()
     ->withoutSetupWizard()           // configure everything in code instead
     ->brands()->prompts()->keywords()->settingsPage()->healthPage()  // pass false to hide
     ->engine(MyEngine::class)        // add an engine (implements Engines\Contracts\Engine)
+    ->keywordSource(MySource::class) // add a keyword source (implements Keywords\Contracts\KeywordSource)
     ->withoutEngine('grok');
 ```
 
@@ -194,6 +216,7 @@ AiVisibilityPlugin::make()
 | `ai-visibility:run {--due} {--brand=ID}` | Start due scheduled runs (runs every 15 minutes from the scheduler), or one brand now |
 | `ai-visibility:probe` | Re-test paused engines and resume those that work (runs every 5 minutes) |
 | `ai-visibility:discover {--brand=ID} {--queue}` | Find, score and classify competitors (runs after every run, and daily) |
+| `ai-visibility:sync-keywords {--brand=ID} {--all}` | Pull keywords from connected sources (due ones run daily) |
 
 ## Costs
 

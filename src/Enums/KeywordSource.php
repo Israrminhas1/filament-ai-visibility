@@ -17,6 +17,8 @@ enum KeywordSource: string implements HasColor, HasLabel
 
     case SerpApiPaa = 'serpapi_paa';
 
+    case Custom = 'custom';
+
     public function getLabel(): string
     {
         return match ($this) {
@@ -25,6 +27,7 @@ enum KeywordSource: string implements HasColor, HasLabel
             self::Gsc => 'Search Console',
             self::DataForSeo => 'DataForSEO',
             self::SerpApiPaa => 'People also ask',
+            self::Custom => 'Connected source',
         };
     }
 
@@ -36,6 +39,7 @@ enum KeywordSource: string implements HasColor, HasLabel
             self::Gsc => 'info',
             self::DataForSeo => 'warning',
             self::SerpApiPaa => 'primary',
+            self::Custom => 'gray',
         };
     }
 }

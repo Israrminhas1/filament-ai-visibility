@@ -5,6 +5,7 @@ namespace IsrarMinhas\FilamentAiVisibility\Filament\Resources\PromptResource\Pag
 use Filament\Actions\Action;
 use Filament\Actions\CreateAction;
 use Filament\Resources\Pages\ManageRecords;
+use IsrarMinhas\FilamentAiVisibility\Filament\Actions\GeneratePromptsAction;
 use IsrarMinhas\FilamentAiVisibility\Filament\Actions\ImportAction;
 use IsrarMinhas\FilamentAiVisibility\Filament\Concerns\HandlesLimitExceptions;
 use IsrarMinhas\FilamentAiVisibility\Filament\Resources\PromptResource;
@@ -29,6 +30,7 @@ class ManagePrompts extends ManageRecords
                     ['Brand', 'Prompt', 'Topic', 'Intent', 'Status', 'Answers (30 days)', 'Brand mentioned (30 days)', 'Visibility % (30 days)', 'Last run'],
                     $this->exportRows(),
                 )),
+            GeneratePromptsAction::make(),
             ImportAction::prompts(),
             CreateAction::make()->label('New prompt'),
         ];

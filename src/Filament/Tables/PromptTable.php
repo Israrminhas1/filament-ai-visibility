@@ -41,6 +41,12 @@ class PromptTable
                 ->placeholder('No answers'),
             TextColumn::make('status')->badge()->sortable(),
             TextColumn::make('source')->badge()->toggleable(isToggledHiddenByDefault: true),
+            TextColumn::make('quality_score')
+                ->label('Quality')
+                ->formatStateUsing(fn ($state) => $state ? $state . '/5' : null)
+                ->description(fn (Prompt $record) => $record->quality_reason ? str($record->quality_reason)->limit(60)->toString() : null)
+                ->placeholder('—')
+                ->toggleable(isToggledHiddenByDefault: true),
             TextColumn::make('keywords_count')->label('Keywords')->counts('keywords')->toggleable(isToggledHiddenByDefault: true),
             TextColumn::make('last_run_at')->label('Last run')->since()->placeholder('Never')->sortable()->toggleable(),
         ]));
@@ -93,6 +99,12 @@ class PromptTable
                         ->status($skipped ? 'warning' : 'success')
                         ->send();
                 })
+                ->deselectRecordsAfterCompletion(),
+
+            BulkAction::make('reject')
+                ->label('Reject')
+                ->icon('heroicon-o-x-mark')
+                ->action(fn (Collection $records) => $records->each->update(['status' => PromptStatus::Rejected]))
                 ->deselectRecordsAfterCompletion(),
 
             BulkAction::make('pause')
