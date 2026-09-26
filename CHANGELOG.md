@@ -5,6 +5,11 @@
 - Google AI Overviews and Google AI Mode engines through SerpAPI, sharing one key (`AI_VISIBILITY_SERPAPI_KEY`). Separately loaded overviews are fetched automatically; searches without an AI answer are recorded, not failed. Key and quota problems pause the engines like any other.
 - Economy mode: scheduled runs on OpenAI and Claude use the batch APIs at about half the token cost. Failed, expired, rejected or overdue batch answers are retried in real time; account errors pause the engine. New `ai-visibility:poll-batches` command (every 5 minutes) and a waiting notice on the run page.
 - Engines that share a provider share a stored key; engines that cannot answer plain prompts are never picked for helper features.
+- Perplexity moved to the Agent API (Sonar Chat Completions ends on September 27, 2026). Saved `sonar` / `sonar-pro` settings keep working.
+- Current model lists, limited to models that search the web and return sources: GPT-6, Claude Fable 5.1 / Opus 5.5, Gemini 3.x, Grok 4.7. Prices updated.
+- Claude always uses the basic web search tool, which works on every model and in batches and returns every source.
+- Gemini 3 searches are counted and priced per query; Gemini 2.5 per prompt (`pricing.search_fee_models`).
+- A model that can't search the web or doesn't exist pauses its engine with that reason instead of failing every answer.
 
 ## Unreleased — Milestone 7 (alerts and scheduled reports)
 

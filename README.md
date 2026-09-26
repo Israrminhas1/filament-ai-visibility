@@ -68,13 +68,15 @@ Each run asks every active prompt on every enabled engine (× samples per prompt
 | Anthropic | Messages API with the web search server tool |
 | Gemini | Grounding with Google Search |
 | Grok | xAI Responses API with the `web_search` tool |
-| Perplexity | Sonar (always searches) |
+| Perplexity | Agent API (`perplexity/sonar`) with the `web_search` tool |
 | Google AI Overviews | The AI Overview on a Google search, through SerpAPI |
 | Google AI Mode | Google AI Mode, through SerpAPI |
 
 Both Google engines share one SerpAPI key and cost one SerpAPI search per answer (two when an overview loads separately). When Google shows no AI answer for a search, that is recorded as an answer without a mention rather than a failure. They only track answers: helper features always use one of the other engines.
 
 The brand's market (e.g. "United Kingdom" or "GB") is sent as the search location where the engine supports it.
+
+The model pickers only suggest current models that support web search and return their sources (defaults: `gpt-6-luna`, `claude-sonnet-5`, `gemini-3.8-flash`, `grok-4.7`, `perplexity/sonar`). You can type any other model name; if the provider says it can't search the web or doesn't exist, the engine pauses with that reason instead of failing every answer. Gemini 2.5 models are listed for projects that already have access to them.
 
 For every answer AI Visibility records:
 - whether the brand is mentioned, how often, and its position among all tracked brands

@@ -58,7 +58,9 @@ it('resolves registrable domains and subdomain matches', function () {
 it('prices calls by model, snapshot and search count', function () {
     $pricing = app(Pricing::class);
 
-    expect($pricing->cost('openai', 'gpt-5-mini', 1_000_000, 0))->toBe(0.25)
+    expect($pricing->cost('gemini', 'gemini-3.8-flash', 0, 0, searches: 3))->toBe(0.042)
+        ->and($pricing->cost('gemini', 'gemini-2.5-flash-002', 0, 0, searches: 1))->toBe(0.035)
+        ->and($pricing->cost('openai', 'gpt-5-mini', 1_000_000, 0))->toBe(0.25)
         ->and($pricing->cost('openai', 'gpt-5-mini-2025-08-07', 0, 1_000_000, searches: 2))->toBe(2.02)
         ->and($pricing->cost('anthropic', 'claude-future-9', 1_000_000, 0))->toBe(3.0);
 });

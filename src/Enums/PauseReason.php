@@ -46,7 +46,7 @@ enum PauseReason: string implements HasLabel
             self::InvalidKey => 'The provider rejected the API key. Replace it, then click "Test & resume".',
             self::InsufficientCredits => 'Add credits or a payment method in the provider\'s billing dashboard. The engine is re-checked automatically every few hours, or click "Test & resume".',
             self::RateLimited => 'The provider is limiting requests. The engine resumes automatically; lower "Requests per minute" in Settings if this keeps happening.',
-            self::ModelUnavailable => 'The selected model is not available for this key. Choose another model in Settings, then click "Test & resume".',
+            self::ModelUnavailable => 'The selected model is not available for this key, or it cannot search the web. Choose another model in Settings, then click "Test & resume".',
             self::ProviderOutage => 'The provider is failing or unreachable. The engine is retried automatically.',
             self::Budget => 'The monthly budget was reached. Raise the budget in Settings or wait for the next month.',
             self::Manual => 'Resume the engine when you are ready.',

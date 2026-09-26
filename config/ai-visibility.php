@@ -80,30 +80,33 @@ return [
     |
     */
     'engines' => [
+        // `models` lists only models that support the engine's web search and return sources.
         'openai' => [
-            'tracking_model' => 'gpt-5-mini',
-            'helper_model' => 'gpt-5-mini',
-            'models' => ['gpt-5', 'gpt-5-mini', 'gpt-5-nano', 'gpt-4.1', 'gpt-4.1-mini', 'gpt-4o', 'gpt-4o-mini'],
+            'tracking_model' => 'gpt-6-luna',
+            'helper_model' => 'gpt-6-luna',
+            'models' => ['gpt-6-astra', 'gpt-6-sol', 'gpt-6-luna', 'gpt-5.5', 'gpt-5.4', 'gpt-5-mini'],
         ],
         'anthropic' => [
             'tracking_model' => 'claude-sonnet-5',
-            'helper_model' => 'claude-haiku-4-5',
-            'models' => ['claude-opus-5', 'claude-sonnet-5', 'claude-sonnet-4-6', 'claude-haiku-4-5'],
+            'helper_model' => 'claude-sonnet-5',
+            'models' => ['claude-fable-5-1', 'claude-opus-5-5', 'claude-sonnet-5', 'claude-haiku-4-5'],
         ],
         'gemini' => [
-            'tracking_model' => 'gemini-2.5-flash',
-            'helper_model' => 'gemini-2.5-flash-lite',
-            'models' => ['gemini-2.5-pro', 'gemini-2.5-flash', 'gemini-2.5-flash-lite'],
+            'tracking_model' => 'gemini-3.8-flash',
+            'helper_model' => 'gemini-3.5-flash-lite',
+            // 2.5 models are only available to projects that already used them.
+            'models' => ['gemini-3.8-flash', 'gemini-3.7-flash', 'gemini-3.5-flash', 'gemini-3.5-flash-lite', 'gemini-3.1-pro-preview', 'gemini-2.5-flash', 'gemini-2.5-pro'],
         ],
         'grok' => [
             'tracking_model' => 'grok-4.7',
-            'helper_model' => 'grok-4.7',
-            'models' => ['grok-4.7', 'grok-4'],
+            'helper_model' => 'grok-4.3',
+            'models' => ['grok-4.7', 'grok-4.6', 'grok-4.3'],
         ],
+        // Perplexity's Agent API. "perplexity/sonar" is what Perplexity itself answers with.
         'perplexity' => [
-            'tracking_model' => 'sonar',
-            'helper_model' => 'sonar',
-            'models' => ['sonar', 'sonar-pro'],
+            'tracking_model' => 'perplexity/sonar',
+            'helper_model' => 'perplexity/sonar',
+            'models' => ['perplexity/sonar'],
         ],
         // Google's own AI answers, read through SerpAPI (no model choice).
         'google_ai_overview' => [
@@ -143,9 +146,9 @@ return [
     'estimated_cost_per_result' => [
         'openai' => 0.015,
         'anthropic' => 0.03,
-        'gemini' => 0.01,
+        'gemini' => 0.03,
         'grok' => 0.02,
-        'perplexity' => 0.008,
+        'perplexity' => 0.005,
         'google_ai_overview' => 0.015,
         'google_ai_mode' => 0.015,
     ],
@@ -185,6 +188,11 @@ return [
     */
     'pricing' => [
         'models' => [
+            'gpt-6-astra' => [10.00, 50.00],
+            'gpt-6-sol' => [2.00, 10.00],
+            'gpt-6-luna' => [0.10, 0.50],
+            'gpt-5.5' => [5.00, 30.00],
+            'gpt-5.4' => [2.50, 15.00],
             'gpt-5' => [1.25, 10.00],
             'gpt-5-mini' => [0.25, 2.00],
             'gpt-5-nano' => [0.05, 0.40],
@@ -192,15 +200,25 @@ return [
             'gpt-4.1-mini' => [0.40, 1.60],
             'gpt-4o' => [2.50, 10.00],
             'gpt-4o-mini' => [0.15, 0.60],
+            'claude-fable-5-1' => [10.00, 50.00],
             'claude-opus-5-5' => [4.00, 20.00],
             'claude-opus-5' => [5.00, 25.00],
             'claude-sonnet-5' => [2.00, 10.00],
             'claude-sonnet-4-6' => [3.00, 15.00],
             'claude-haiku-4-5' => [1.00, 5.00],
+            'gemini-3.8-flash' => [0.75, 3.75],
+            'gemini-3.7-flash' => [0.75, 3.75],
+            'gemini-3.5-flash' => [1.50, 9.00],
+            'gemini-3.5-flash-lite' => [0.30, 2.50],
+            'gemini-3.1-pro-preview' => [2.00, 12.00],
             'gemini-2.5-pro' => [1.25, 10.00],
             'gemini-2.5-flash' => [0.30, 2.50],
             'gemini-2.5-flash-lite' => [0.10, 0.40],
+            'grok-4.7' => [2.00, 6.00],
+            'grok-4.6' => [2.00, 6.00],
+            'grok-4.3' => [1.25, 2.50],
             'grok-4' => [3.00, 15.00],
+            'perplexity/sonar' => [0.25, 2.50],
             'sonar-pro' => [3.00, 15.00],
             'sonar' => [1.00, 1.00],
         ],
@@ -218,12 +236,17 @@ return [
         'search_fee' => [
             'openai' => 0.01,
             'anthropic' => 0.01,
-            'gemini' => 0.035,
+            // Gemini 3 bills each search query; 2.5 models bill per grounded prompt (see search_fee_models).
+            'gemini' => 0.014,
             'grok' => 0.01,
-            'perplexity' => 0.008,
+            'perplexity' => 0.0025,
             // Per SerpAPI search; depends on your SerpAPI plan.
             'google_ai_overview' => 0.015,
             'google_ai_mode' => 0.015,
+        ],
+        // Per-model search fees that differ from the engine's; prefixes match ("gemini-2.5" covers all 2.5 models).
+        'search_fee_models' => [
+            'gemini-2.5' => 0.035,
         ],
         // Token discount for economy (batch) mode.
         'batch_discount' => 0.5,

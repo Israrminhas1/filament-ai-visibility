@@ -68,16 +68,16 @@ it('reads Claude answers with web search and continues paused turns', function (
         ->and([$answer->inputTokens, $answer->outputTokens, $answer->searches])->toBe([250, 40, 1]);
 
     Http::assertSentCount(2);
-    Http::assertSent(fn ($request) => $request['tools'][0]['type'] === 'web_search_20260209');
 });
 
-it('uses the basic web search tool for older Claude models', function () {
+it('uses the basic web search tool on every Claude model, so sources are always returned', function (string $model) {
     Http::fake(['api.anthropic.com/*' => Http::response(['content' => [['type' => 'text', 'text' => 'Hi']], 'stop_reason' => 'end_turn', 'usage' => []])]);
 
-    ask('anthropic', 'claude-haiku-4-5');
+    ask('anthropic', $model, 'GB');
 
-    Http::assertSent(fn ($request) => $request['tools'][0]['type'] === 'web_search_20250305');
-});
+    Http::assertSent(fn ($request) => $request['tools'][0]['type'] === 'web_search_20250305'
+        && $request['tools'][0]['user_location']['country'] === 'GB');
+})->with(['claude-fable-5-1', 'claude-opus-5-5', 'claude-sonnet-5', 'claude-haiku-4-5']);
 
 it('reads Gemini grounded answers, turning redirect links into real domains', function () {
     Http::fake(['generativelanguage.googleapis.com/*' => Http::response([
@@ -104,12 +104,20 @@ it('reads Gemini grounded answers, turning redirect links into real domains', fu
     Http::assertSent(fn ($request) => str_ends_with($request->url(), '/models/gemini-2.5-flash:generateContent') && isset($request['tools'][0]['google_search']));
 });
 
-it('reads Perplexity and Grok answers', function () {
+it('reads Perplexity Agent API and Grok answers', function () {
     Http::fake([
         'api.perplexity.ai/*' => Http::response([
-            'choices' => [['message' => ['content' => 'Acme [1].']]],
-            'search_results' => [['title' => 'Acme', 'url' => 'https://acme.com']],
-            'usage' => ['prompt_tokens' => 10, 'completion_tokens' => 5],
+            'model' => 'perplexity/sonar',
+            'output' => [
+                ['type' => 'search_results', 'queries' => ['crm'], 'results' => [
+                    ['id' => 1, 'title' => 'Acme', 'url' => 'https://acme.com'],
+                    ['id' => 2, 'title' => 'G2', 'url' => 'https://g2.com/crm'],
+                ]],
+                ['type' => 'message', 'role' => 'assistant', 'content' => [['type' => 'output_text', 'text' => 'Acme [1].', 'annotations' => [
+                    ['type' => 'url_citation', 'url' => 'https://acme.com', 'title' => 'Acme'],
+                ]]]],
+            ],
+            'usage' => ['input_tokens' => 10, 'output_tokens' => 5, 'tool_calls_details' => ['web_search' => ['invocation' => 2]]],
         ]),
         'api.x.ai/*' => Http::response([
             'output' => [['type' => 'message', 'content' => [['type' => 'output_text', 'text' => 'Globex.']]]],
@@ -122,7 +130,8 @@ it('reads Perplexity and Grok answers', function () {
     $grok = ask('grok', 'grok-4.7');
 
     expect($perplexity->answer)->toBe('Acme [1].')
-        ->and($perplexity->citations)->toBe([['url' => 'https://acme.com', 'title' => 'Acme']])
+        ->and($perplexity->citations)->toBe([['url' => 'https://acme.com', 'title' => 'Acme'], ['url' => 'https://g2.com/crm', 'title' => 'G2']])
+        ->and([$perplexity->model, $perplexity->inputTokens, $perplexity->outputTokens, $perplexity->searches])->toBe(['perplexity/sonar', 10, 5, 2])
         ->and($grok->answer)->toBe('Globex.')
         ->and($grok->citations)->toBe([['url' => 'https://globex.io', 'title' => null]])
         ->and($grok->searches)->toBe(1);
@@ -151,4 +160,76 @@ it('treats connection errors as an outage', function () {
     Http::fake(fn () => throw new \Illuminate\Http\Client\ConnectionException('timed out'));
 
     expect(fn () => ask('openai'))->toThrow(fn (EngineRequestFailed $e) => expect($e->reason)->toBe(PauseReason::ProviderOutage));
+});
+
+it('sends Perplexity requests to the Agent API with web search, and maps old Sonar names', function () {
+    Http::fake(['api.perplexity.ai/*' => Http::response(['output' => [['type' => 'message', 'content' => [['type' => 'output_text', 'text' => 'Hi']]]]])]);
+
+    ask('perplexity', 'sonar', 'GB');
+    ask('perplexity', 'sonar-pro');
+
+    Http::assertSent(fn ($request) => $request->url() === 'https://api.perplexity.ai/v1/agent'
+        && ($request['model'] ?? null) === 'perplexity/sonar'
+        && $request['tools'][0] === ['type' => 'web_search', 'user_location' => ['country' => 'GB']]
+        && $request['max_output_tokens'] > 0);
+
+    Http::assertSent(fn ($request) => ($request['preset'] ?? null) === 'low' && ! isset($request['model']));
+});
+
+it('counts every Gemini 3 search query, but one per prompt on Gemini 2.5', function (string $model, int $searches) {
+    Http::fake(['generativelanguage.googleapis.com/*' => Http::response([
+        'modelVersion' => $model,
+        'candidates' => [['content' => ['parts' => [['text' => 'Acme.']]], 'groundingMetadata' => ['webSearchQueries' => ['crm', 'best crm', 'crm uk']]]],
+    ])]);
+
+    expect(ask('gemini', $model)->searches)->toBe($searches);
+})->with([
+    'gemini 3' => ['gemini-3.8-flash', 3],
+    'gemini 2.5' => ['gemini-2.5-flash', 1],
+]);
+
+it('pauses the engine when the model cannot search or does not exist', function (string $engine, int $status, array $body) {
+    Http::fake(['*' => Http::response($body, $status)]);
+
+    try {
+        ask($engine, 'some-model');
+        $this->fail('Expected a failure.');
+    } catch (EngineRequestFailed $e) {
+        expect($e->reason)->toBe(PauseReason::ModelUnavailable);
+    }
+})->with([
+    'openai tool' => ['openai', 400, ['error' => ['message' => "Tool 'web_search' is not supported with gpt-4.1-nano."]]],
+    'gemini grounding' => ['gemini', 400, ['error' => ['message' => 'Search Grounding is not supported.']]],
+    'perplexity model' => ['perplexity', 400, ['error' => ['message' => 'Invalid model: perplexity/nope']]],
+    'anthropic model' => ['anthropic', 404, ['error' => ['type' => 'not_found_error', 'message' => 'model: nope']]],
+]);
+
+it('does not pause for ordinary rejected requests', function () {
+    Http::fake(['api.openai.com/*' => Http::response(['error' => ['message' => 'Your input was flagged by the moderation system.']], 400)]);
+
+    try {
+        ask('openai', 'gpt-6-luna');
+        $this->fail('Expected a failure.');
+    } catch (EngineRequestFailed $e) {
+        expect($e->reason)->toBeNull();
+    }
+});
+
+it('only suggests current models that search the web', function () {
+    $models = collect(app(\IsrarMinhas\FilamentAiVisibility\Engines\EngineRegistry::class)->all())
+        ->mapWithKeys(fn ($engine) => [$engine->key() => $engine->suggestedModels()]);
+
+    expect($models['openai'])->not->toContain('gpt-4o', 'gpt-4o-mini', 'gpt-5-nano', 'gpt-4.1-mini')
+        ->and($models['perplexity'])->toBe(['perplexity/sonar']);
+
+    // Every suggested model has a price, and the defaults are among the suggestions.
+    foreach (app(\IsrarMinhas\FilamentAiVisibility\Engines\EngineRegistry::class)->all() as $engine) {
+        expect($engine->suggestedModels())->toContain($engine->defaultTrackingModel());
+
+        if (! str_starts_with($engine->key(), 'google_')) {
+            foreach ($engine->suggestedModels() as $model) {
+                expect(config('ai-visibility.pricing.models'))->toHaveKey($model);
+            }
+        }
+    }
 });

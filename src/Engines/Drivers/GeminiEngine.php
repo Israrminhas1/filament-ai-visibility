@@ -79,15 +79,17 @@ class GeminiEngine extends HttpEngine
                 'title' => $web['title'] ?? null,
             ]);
 
-        $queries = $response->json('candidates.0.groundingMetadata.webSearchQueries', []);
+        $queries = (array) $response->json('candidates.0.groundingMetadata.webSearchQueries', []);
+        $model = $response->json('modelVersion') ?? $request->model;
 
         return new EngineResponse(
             answer: trim($text),
             citations: EngineResponse::uniqueCitations($citations),
-            model: $response->json('modelVersion') ?? $request->model,
+            model: $model,
             inputTokens: $response->json('usageMetadata.promptTokenCount'),
             outputTokens: $response->json('usageMetadata.candidatesTokenCount'),
-            searches: $queries ? 1 : 0,
+            // Gemini 3 bills every search query; older models bill once per grounded prompt.
+            searches: str_starts_with($model, 'gemini-2') ? ($queries ? 1 : 0) : count($queries),
         );
     }
 

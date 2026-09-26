@@ -4,13 +4,32 @@ namespace IsrarMinhas\FilamentAiVisibility\Engines\Drivers;
 
 use Illuminate\Http\Client\PendingRequest;
 use Illuminate\Http\Client\Response;
-use IsrarMinhas\FilamentAiVisibility\Engines\CompletionResponse;
 use IsrarMinhas\FilamentAiVisibility\Engines\CompletionRequest;
+use IsrarMinhas\FilamentAiVisibility\Engines\CompletionResponse;
+use IsrarMinhas\FilamentAiVisibility\Engines\Drivers\Concerns\ParsesResponsesApi;
 use IsrarMinhas\FilamentAiVisibility\Engines\EngineRequest;
 use IsrarMinhas\FilamentAiVisibility\Engines\EngineResponse;
 
+/**
+ * Perplexity's Agent API (POST /v1/agent), which replaced Sonar Chat
+ * Completions. Answers come back like OpenAI's Responses API, plus a
+ * `search_results` item listing every source that was read.
+ */
 class PerplexityEngine extends HttpEngine
 {
+    use ParsesResponsesApi {
+        parseAnswer as protected parseResponsesAnswer;
+    }
+
+    /**
+     * Old Sonar model names and the Agent API presets Perplexity maps them to.
+     */
+    protected const LEGACY_PRESETS = [
+        'sonar-pro' => 'low',
+        'sonar-reasoning-pro' => 'medium',
+        'sonar-deep-research' => 'high',
+    ];
+
     public function key(): string
     {
         return 'perplexity';
@@ -23,19 +42,19 @@ class PerplexityEngine extends HttpEngine
 
     protected function http(string $apiKey): PendingRequest
     {
-        return $this->client()->baseUrl('https://api.perplexity.ai')->withToken($apiKey);
+        return $this->client()->baseUrl('https://api.perplexity.ai/v1')->withToken($apiKey);
     }
 
     /**
-     * Perplexity has no model-listing endpoint, so the test is a one-token
-     * completion (costs a fraction of a cent).
+     * Perplexity has no model-listing endpoint, so the test is a tiny request
+     * without web search (costs a fraction of a cent).
      */
     protected function sendKeyTest(PendingRequest $request): Response
     {
-        return $request->post('/chat/completions', [
+        return $request->post('/agent', [
             'model' => $this->defaultHelperModel(),
-            'max_tokens' => 1,
-            'messages' => [['role' => 'user', 'content' => 'Hi']],
+            'input' => 'Hi',
+            'max_output_tokens' => 16,
         ]);
     }
 
@@ -44,57 +63,87 @@ class PerplexityEngine extends HttpEngine
         return [];
     }
 
-    /**
-     * Sonar models always search the web.
-     */
     protected function sendAsk(PendingRequest $http, EngineRequest $request): Response
     {
         $body = [
-            'model' => $request->model,
-            'messages' => [['role' => 'user', 'content' => $request->prompt]],
+            ...$this->modelFields($request->model),
+            'input' => $request->prompt,
+            'max_output_tokens' => (int) config('ai-visibility.tracking.max_output_tokens', 4096),
         ];
 
-        if ($request->country) {
-            $body['web_search_options'] = ['user_location' => ['country' => $request->country]];
+        // Presets bring their own tools.
+        if (! isset($body['preset'])) {
+            $tool = ['type' => 'web_search'];
+
+            if ($request->country) {
+                $tool['user_location'] = ['country' => $request->country];
+            }
+
+            $body['tools'] = [$tool];
         }
 
-        return $http->post('/chat/completions', $body);
+        return $http->post('/agent', $body);
     }
 
     protected function parseAnswer(Response $response, EngineRequest $request): EngineResponse
     {
-        $citations = $response->json('search_results') ?: $response->json('citations', []);
+        $answer = $this->parseResponsesAnswer($response, $request);
+        $results = [];
+        $searchItems = 0;
 
+        foreach ((array) $response->json('output', []) as $item) {
+            if (($item['type'] ?? null) === 'search_results') {
+                $searchItems++;
+                array_push($results, ...(array) ($item['results'] ?? []));
+            }
+        }
+
+        // Sources the answer cites come first, then everything the search returned.
         return new EngineResponse(
-            answer: trim((string) $response->json('choices.0.message.content')),
-            citations: EngineResponse::uniqueCitations($citations),
-            model: $response->json('model') ?? $request->model,
-            inputTokens: $response->json('usage.prompt_tokens'),
-            outputTokens: $response->json('usage.completion_tokens'),
-            searches: 1,
+            answer: $answer->answer ?: trim((string) $response->json('output_text')),
+            citations: EngineResponse::uniqueCitations([...$answer->citations, ...$results]),
+            model: $answer->model,
+            inputTokens: $answer->inputTokens,
+            outputTokens: $answer->outputTokens,
+            searches: (int) ($response->json('usage.tool_calls_details.web_search.invocation') ?? $searchItems),
         );
     }
 
     protected function sendCompletion(PendingRequest $http, CompletionRequest $request): Response
     {
-        return $http->post('/chat/completions', [
-            'model' => $request->model,
-            'max_tokens' => $request->maxTokens,
-            'messages' => array_values(array_filter([
-                $request->system ? ['role' => 'system', 'content' => $request->system] : null,
-                ['role' => 'user', 'content' => $request->prompt . $this->jsonInstruction($request)],
-            ])),
-        ]);
+        return $http->post('/agent', array_filter([
+            ...$this->modelFields($request->model),
+            'input' => $request->prompt . $this->jsonInstruction($request),
+            'instructions' => $request->system,
+            'max_output_tokens' => $request->maxTokens,
+        ]));
     }
 
     protected function parseCompletion(Response $response, CompletionRequest $request): CompletionResponse
     {
+        $answer = $this->parseResponsesAnswer($response, new EngineRequest($request->prompt, $request->model, $request->apiKey));
+
         return new CompletionResponse(
-            text: (string) $response->json('choices.0.message.content'),
-            model: $response->json('model') ?? $request->model,
-            inputTokens: $response->json('usage.prompt_tokens'),
-            outputTokens: $response->json('usage.completion_tokens'),
-            searches: 1,
+            $answer->answer ?: (string) $response->json('output_text'),
+            $answer->model,
+            $answer->inputTokens,
+            $answer->outputTokens,
         );
+    }
+
+    /**
+     * "provider/model" names go in `model`; old Sonar names still work.
+     *
+     * @return array{model?: string, preset?: string}
+     */
+    protected function modelFields(string $model): array
+    {
+        $model = trim($model);
+
+        if (isset(self::LEGACY_PRESETS[$model])) {
+            return ['preset' => self::LEGACY_PRESETS[$model]];
+        }
+
+        return ['model' => str_contains($model, '/') ? $model : 'perplexity/' . $model];
     }
 }

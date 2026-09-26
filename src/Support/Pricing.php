@@ -20,9 +20,26 @@ class Pricing
             $tokens *= 1 - min(1, max(0, (float) config('ai-visibility.pricing.batch_discount', 0.5)));
         }
 
-        $searchFee = (float) config("ai-visibility.pricing.search_fee.{$engine}", 0);
+        return round($tokens + $searches * $this->searchFee($engine, $model), 8);
+    }
 
-        return round($tokens + $searches * $searchFee, 8);
+    /**
+     * USD per search: a model-specific fee (longest matching prefix) or the engine's.
+     */
+    public function searchFee(string $engine, ?string $model): float
+    {
+        $model = strtolower((string) $model);
+        $best = null;
+
+        foreach (array_keys(config('ai-visibility.pricing.search_fee_models', [])) as $prefix) {
+            if (str_starts_with($model, strtolower($prefix)) && ($best === null || strlen($prefix) > strlen($best))) {
+                $best = $prefix;
+            }
+        }
+
+        return (float) ($best !== null
+            ? config('ai-visibility.pricing.search_fee_models')[$best]
+            : config("ai-visibility.pricing.search_fee.{$engine}", 0));
     }
 
     public function tokenCost(string $engine, ?string $model, ?int $inputTokens, ?int $outputTokens): float

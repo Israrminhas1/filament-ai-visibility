@@ -171,7 +171,7 @@ A plain API call does not reflect what users see in ChatGPT or Perplexity, so ev
 | Engine | API | Search mode | Citations from |
 |---|---|---|---|
 | OpenAI (ChatGPT) | Responses API | `web_search` tool | `url_citation` annotations |
-| Perplexity | Sonar | Built in | `citations` / `search_results` |
+| Perplexity | Agent API (`/v1/agent`) | `web_search` tool | `url_citation` annotations + `search_results` |
 | Gemini | `generateContent` | `google_search` grounding | `groundingMetadata` chunks |
 | Claude | Messages API | Web search server tool | `web_search_result` blocks + text citations |
 | Grok | xAI API | Web search tool | Response citations |

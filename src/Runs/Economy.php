@@ -11,6 +11,7 @@ use IsrarMinhas\FilamentAiVisibility\Engines\EngineRequestFailed;
 use IsrarMinhas\FilamentAiVisibility\Engines\EngineResponse;
 use IsrarMinhas\FilamentAiVisibility\Engines\KeyResolver;
 use IsrarMinhas\FilamentAiVisibility\Enums\EngineStatus;
+use IsrarMinhas\FilamentAiVisibility\Enums\PauseReason;
 use IsrarMinhas\FilamentAiVisibility\Enums\ResultStatus;
 use IsrarMinhas\FilamentAiVisibility\Enums\RunTrigger;
 use IsrarMinhas\FilamentAiVisibility\Events\ResultRecorded;
@@ -113,6 +114,13 @@ class Economy
         try {
             $providerId = $driver->submitBatch((string) $this->keys->resolve($engine), $requests);
         } catch (EngineRequestFailed $e) {
+            // Rejected by the batch API only: real-time requests decide whether the model really can't be used.
+            if ($e->reason === PauseReason::ModelUnavailable) {
+                $this->realtime($results->modelKeys(), $engine, $run->tenant_id);
+
+                return null;
+            }
+
             $this->engines->recordFailure($engine, $e->reason, $e->getMessage(), $e->retryAfter);
 
             if ($this->engines->state($engine)->status === EngineStatus::Paused) {
@@ -249,8 +257,9 @@ class Economy
                 continue;
             }
 
-            // Bad key, no credits…: pause the engine like a real-time failure would.
-            if ($outcome->reason && ! $outcome->isTransient()) {
+            // Bad key, no credits…: pause the engine like a real-time failure would. A model
+            // or tool the batch API rejects may still work in real time, so that is retried.
+            if ($outcome->reason && ! $outcome->isTransient() && $outcome->reason !== PauseReason::ModelUnavailable) {
                 $this->engines->recordFailure($batch->engine, $outcome->reason, $outcome->getMessage());
                 $this->progress->finish($result, ResultStatus::Skipped, [
                     'skip_reason' => 'engine_paused:' . $outcome->reason->value,

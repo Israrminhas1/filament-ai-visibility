@@ -100,7 +100,7 @@ describe('helper calls', function () {
         Http::fake(['api.anthropic.com/*' => Http::response(['content' => [['type' => 'text', 'text' => '{"x":1}']], 'usage' => []])]);
 
         expect(app(HelperAi::class)->json('analysis', 'Hi'))->toBe(['x' => 1]);
-        Http::assertSent(fn ($request) => ! isset($request['tools']) && $request['model'] === 'claude-haiku-4-5');
+        Http::assertSent(fn ($request) => ! isset($request['tools']) && $request['model'] === 'claude-sonnet-5');
 
         app(KeyResolver::class)->remove('anthropic');
         app(KeyResolver::class)->store('gemini', 'g');

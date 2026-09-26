@@ -143,6 +143,8 @@ it('runs a full OpenAI batch at the discounted price and retries rejected items 
         ->and((float) $first->cost_usd)->toEqualWithDelta(($fullPrice - $searchFee) / 2 + $searchFee, 0.000001)
         ->and($second->fresh()->status)->toBe(ResultStatus::Pending);
 
+    // The batch API rejecting the tool says nothing about real time: no pause, just a retry.
+    expect(app(EngineManager::class)->state('openai')->status)->not->toBe(EngineStatus::Paused);
     Queue::assertPushed(RunResultJob::class, fn ($job) => $job->resultId === $second->id);
 });
 

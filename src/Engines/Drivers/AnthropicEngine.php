@@ -171,11 +171,11 @@ class AnthropicEngine extends HttpEngine implements SupportsBatches
      */
     protected function webSearchTool(EngineRequest $request): array
     {
-        // Newer models support the dynamic-filtering version of the tool; older ones only the basic one.
-        $basicOnly = (bool) preg_match('/haiku|claude-3|claude-(opus|sonnet)-4-[0-5]\b|claude-(opus|sonnet)-4$/', $request->model);
-
+        // The basic tool works on every model and in batches, and returns every
+        // search result directly. The newer versions filter results through
+        // code execution, which some models reject and which hides sources.
         $tool = [
-            'type' => $basicOnly ? 'web_search_20250305' : 'web_search_20260209',
+            'type' => 'web_search_20250305',
             'name' => 'web_search',
             'max_uses' => (int) config('ai-visibility.tracking.max_searches', 5),
         ];

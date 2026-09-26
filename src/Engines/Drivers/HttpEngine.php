@@ -134,6 +134,11 @@ abstract class HttpEngine implements Engine
             || str_contains($body, 'payment required')
             || str_contains($body, 'exceeded your current quota');
 
+        // The chosen model can't search the web, or doesn't exist: every request would fail the same way.
+        $badModel = (str_contains($body, 'not supported') || str_contains($body, 'unsupported') || str_contains($body, 'not available'))
+                && (str_contains($body, 'tool') || str_contains($body, 'search') || str_contains($body, 'grounding'))
+            || (str_contains($body, 'model') && (str_contains($body, 'does not exist') || str_contains($body, 'not found') || str_contains($body, 'invalid model') || str_contains($body, 'unknown model')));
+
         return match (true) {
             $status === 401, $status === 403 => $billing ? PauseReason::InsufficientCredits : PauseReason::InvalidKey,
             $status === 402 => PauseReason::InsufficientCredits,
@@ -141,6 +146,7 @@ abstract class HttpEngine implements Engine
             $status === 404 => PauseReason::ModelUnavailable,
             $status === 400 && (str_contains($body, 'api key not valid') || str_contains($body, 'api_key_invalid') || str_contains($body, 'invalid api key')) => PauseReason::InvalidKey,
             $status === 400 && $billing => PauseReason::InsufficientCredits,
+            $status === 400 && $badModel => PauseReason::ModelUnavailable,
             $status >= 500 => PauseReason::ProviderOutage,
             default => null,
         };
