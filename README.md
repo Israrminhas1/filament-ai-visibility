@@ -40,7 +40,9 @@ php artisan queue:work
 * * * * * cd /path-to-your-app && php artisan schedule:run >> /dev/null 2>&1
 ```
 
-A tracking job can take up to 240 seconds (web searches are slow). Set your queue connection's `retry_after` in `config/queue.php` above that, e.g. `300`, or a slow answer may be handed to a second worker.
+Some jobs run for a long time: answering a prompt can take up to 4 minutes (web searches are slow) and re-checking a brand's past answers up to 15 minutes. Laravel's default `retry_after` is 90 seconds, after which a still-running job is handed to a second worker. Raise it for the queue connection AI Visibility uses, e.g. `DB_QUEUE_RETRY_AFTER=960` (or `REDIS_QUEUE_RETRY_AFTER=960`), and start the worker with a matching timeout: `php artisan queue:work --timeout=930`.
+
+To keep AI Visibility off your app's main queue, set `AI_VISIBILITY_QUEUE_CONNECTION` and/or `AI_VISIBILITY_QUEUE` (e.g. `ai-visibility`) and run a worker for it: `php artisan queue:work --queue=ai-visibility --timeout=930`. In production keep the worker running with Supervisor or Laravel Horizon.
 
 Then open **AI Visibility** in your panel. The setup wizard walks you through the rest.
 
