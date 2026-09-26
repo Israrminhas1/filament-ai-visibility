@@ -14,7 +14,9 @@ use IsrarMinhas\FilamentAiVisibility\Commands\HealthCommand;
 use IsrarMinhas\FilamentAiVisibility\Commands\InstallCommand;
 use IsrarMinhas\FilamentAiVisibility\Commands\PollBatchesCommand;
 use IsrarMinhas\FilamentAiVisibility\Commands\ProbeCommand;
+use IsrarMinhas\FilamentAiVisibility\Commands\RedetectCommand;
 use IsrarMinhas\FilamentAiVisibility\Commands\RunCommand;
+use IsrarMinhas\FilamentAiVisibility\Commands\SweepRunsCommand;
 use IsrarMinhas\FilamentAiVisibility\Commands\SyncKeywordsCommand;
 use IsrarMinhas\FilamentAiVisibility\Engines\Drivers\AnthropicEngine;
 use IsrarMinhas\FilamentAiVisibility\Engines\Drivers\GeminiEngine;
@@ -74,6 +76,7 @@ class AiVisibilityServiceProvider extends PackageServiceProvider
                 'create_ai_visibility_connections_table',
                 'create_ai_visibility_automation_tables',
                 'create_ai_visibility_batches_table',
+                'add_ai_visibility_reliability_columns',
             ])
             ->hasCommands([
                 InstallCommand::class,
@@ -86,6 +89,8 @@ class AiVisibilityServiceProvider extends PackageServiceProvider
                 AlertsCommand::class,
                 SendReportsCommand::class,
                 PollBatchesCommand::class,
+                SweepRunsCommand::class,
+                RedetectCommand::class,
             ]);
     }
 
@@ -218,6 +223,12 @@ class AiVisibilityServiceProvider extends PackageServiceProvider
                 ->everyFiveMinutes()
                 ->withoutOverlapping()
                 ->name('ai-visibility:poll-batches');
+
+            // Close runs whose remaining answers were lost (e.g. a flushed queue).
+            $schedule->command('ai-visibility:sweep-runs')
+                ->hourly()
+                ->withoutOverlapping()
+                ->name('ai-visibility:sweep-runs');
         });
     }
 }

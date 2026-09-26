@@ -19,6 +19,9 @@ class RateLimitEngine
         $key = "ai-visibility:{$job->tenantId}:{$job->engine}";
         $limit = Tenancy::as($job->tenantId, fn () => app(EngineManager::class)->requestsPerMinute($job->engine));
 
+        // Released for exactly as long as the limiter needs. The job's retry window is
+        // sized to the run and its dispatch is spread out (RunResultJob::dispatchPaced()), so
+        // waiting here does not use up the time the job has to be answered.
         if (RateLimiter::tooManyAttempts($key, $limit)) {
             $job->release(max(1, RateLimiter::availableIn($key)));
 

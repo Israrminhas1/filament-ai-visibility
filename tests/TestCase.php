@@ -17,6 +17,7 @@ use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Schema;
 use IsrarMinhas\FilamentAiVisibility\AiVisibilityServiceProvider;
+use IsrarMinhas\FilamentAiVisibility\Competitors\EvidenceFetcher;
 use IsrarMinhas\FilamentAiVisibility\Models\Brand;
 use IsrarMinhas\FilamentAiVisibility\Support\Settings;
 use IsrarMinhas\FilamentAiVisibility\Support\Tenancy;
@@ -35,6 +36,9 @@ abstract class TestCase extends Orchestra
         parent::setUp();
 
         Tenancy::resolveUsing(null);
+
+        // No real DNS lookups in tests: every host resolves to a public example address.
+        $this->app->instance(EvidenceFetcher::class, (new EvidenceFetcher)->resolveUsing(fn () => ['93.184.216.34']));
     }
 
     protected function getPackageProviders($app): array
@@ -103,6 +107,7 @@ abstract class TestCase extends Orchestra
         (include __DIR__ . '/../database/migrations/create_ai_visibility_connections_table.php.stub')->up();
         (include __DIR__ . '/../database/migrations/create_ai_visibility_automation_tables.php.stub')->up();
         (include __DIR__ . '/../database/migrations/create_ai_visibility_batches_table.php.stub')->up();
+        (include __DIR__ . '/../database/migrations/add_ai_visibility_reliability_columns.php.stub')->up();
     }
 
     public function createUser(array $attributes = []): User

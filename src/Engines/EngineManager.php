@@ -2,6 +2,9 @@
 
 namespace IsrarMinhas\FilamentAiVisibility\Engines;
 
+use Illuminate\Contracts\Cache\LockTimeoutException;
+use Illuminate\Database\UniqueConstraintViolationException;
+use Illuminate\Support\Facades\Cache;
 use IsrarMinhas\FilamentAiVisibility\Engines\Contracts\Engine;
 use IsrarMinhas\FilamentAiVisibility\Enums\EngineStatus;
 use IsrarMinhas\FilamentAiVisibility\Enums\PauseReason;
@@ -9,7 +12,11 @@ use IsrarMinhas\FilamentAiVisibility\Events\EnginePaused;
 use IsrarMinhas\FilamentAiVisibility\Events\EngineResumed;
 use IsrarMinhas\FilamentAiVisibility\Models\Brand;
 use IsrarMinhas\FilamentAiVisibility\Models\EngineState;
+use IsrarMinhas\FilamentAiVisibility\Models\ProviderKey;
+use IsrarMinhas\FilamentAiVisibility\Models\SettingsRecord;
 use IsrarMinhas\FilamentAiVisibility\Support\Settings;
+use IsrarMinhas\FilamentAiVisibility\Support\Tenancy;
+use RuntimeException;
 
 /**
  * Which engines are enabled, usable or paused, and why.
@@ -71,7 +78,89 @@ class EngineManager
 
     public function state(string $engine): EngineState
     {
-        return EngineState::query()->firstOrCreate(['engine' => $engine]);
+        if ($state = $this->findState($engine)) {
+            return $state;
+        }
+
+        $create = function () use ($engine): EngineState {
+            try {
+                return $this->findState($engine) ?? EngineState::query()->create(['engine' => $engine]);
+            } catch (UniqueConstraintViolationException) {
+                // Another process created it first.
+                return $this->findState($engine) ?? throw new RuntimeException("Could not load the state of engine [{$engine}].");
+            }
+        };
+
+        // Most databases don't enforce a unique index on a NULL tenant_id, so the
+        // single-tenant row is created under a lock instead.
+        if (Tenancy::currentId() === null) {
+            try {
+                return Cache::lock("ai-visibility:engine-state:{$engine}", 10)->block(5, $create);
+            } catch (LockTimeoutException) {
+                return $create();
+            }
+        }
+
+        return $create();
+    }
+
+    protected function findState(string $engine): ?EngineState
+    {
+        // The oldest row wins, should a duplicate ever exist.
+        return EngineState::query()->where('engine', $engine)->orderBy('id')->first();
+    }
+
+    /**
+     * Tenants with settings, keys or engine state, for console commands that act
+     * on each tenant in turn. Empty for a single-tenant install.
+     *
+     * @return array<int|string>
+     */
+    public function tenantIds(): array
+    {
+        if (! Tenancy::enabled()) {
+            return [];
+        }
+
+        return collect([SettingsRecord::class, ProviderKey::class, EngineState::class])
+            ->flatMap(fn (string $model) => $model::query()->withoutGlobalScopes()->whereNotNull('tenant_id')->distinct()->pluck('tenant_id'))
+            ->unique()
+            ->values()
+            ->all();
+    }
+
+    /**
+     * Run a callback for the given tenant, the current one, or every known tenant.
+     * A multi-tenant install never runs as "no tenant", so no rows are created
+     * without a tenant_id.
+     *
+     * @param  callable(int|string|null): void  $callback
+     */
+    public function forEachTenant(int | string | null $tenantId, callable $callback): void
+    {
+        if ($tenantId !== null && $tenantId !== '') {
+            Tenancy::as($tenantId, fn () => $callback($tenantId));
+
+            return;
+        }
+
+        if (($current = Tenancy::currentId()) !== null) {
+            $callback($current);
+
+            return;
+        }
+
+        $tenants = $this->tenantIds();
+
+        if ($tenants === []) {
+            $callback(null);
+
+            return;
+        }
+
+        foreach ($tenants as $tenant) {
+            Tenancy::as($tenant, fn () => $callback($tenant));
+        }
     }
 
     public function model(string $engine, ?Brand $brand = null): string
@@ -142,12 +231,22 @@ class EngineManager
         return $result;
     }
 
+    /**
+     * A real answer came back. It only ends a pause that would have ended on its
+     * own (outage, rate limit, credits); manual, budget and key pauses stay.
+     */
     public function recordSuccess(string $engine): void
     {
         $state = $this->state($engine);
 
         if ($state->status === EngineStatus::Paused) {
-            $this->resume($engine);
+            if ($state->reason?->resumesAutomatically() ?? true) {
+                // A healthy call resets the outage back-off.
+                $state->forceFill(['last_error' => null])->save();
+                $this->resume($engine);
+            } else {
+                $state->forceFill(['last_success_at' => now()])->save();
+            }
 
             return;
         }
@@ -178,7 +277,12 @@ class EngineManager
         $state->fill([
             'consecutive_failures' => $failures,
             'last_error_at' => now(),
-            'last_error' => ['reason' => $reason?->value, 'message' => $message],
+            // The outage back-off counter is kept; only a real answer resets it.
+            'last_error' => array_filter([
+                'reason' => $reason?->value,
+                'message' => $message,
+                'outage_pauses' => $state->last_error['outage_pauses'] ?? null,
+            ], fn ($value) => $value !== null),
         ])->save();
 
         match ($reason) {
@@ -244,11 +348,21 @@ class EngineManager
             ->all();
     }
 
+    /**
+     * Without explicit times, a reason that recovers on its own keeps its next
+     * automatic check (or gets one), so the engine is never left stuck.
+     */
     public function pause(string $engine, PauseReason $reason, ?string $message = null, mixed $probeAt = null, mixed $resumeAt = null): void
     {
         $state = $this->state($engine);
 
         $alreadyPaused = $state->status === EngineStatus::Paused && $state->reason === $reason;
+
+        if ($probeAt === null && $resumeAt === null && $reason->resumesAutomatically()) {
+            [$probeAt, $resumeAt] = $alreadyPaused && ($state->next_probe_at?->isFuture() || $state->resume_after?->isFuture())
+                ? [$state->next_probe_at, $state->resume_after]
+                : $this->schedule($state, $reason);
+        }
 
         $state->fill([
             'status' => EngineStatus::Paused,
@@ -263,6 +377,23 @@ class EngineManager
         if (! $alreadyPaused) {
             EnginePaused::dispatch($engine, $reason, $state->message);
         }
+    }
+
+    /**
+     * When a paused engine is checked next: [next_probe_at, resume_after].
+     *
+     * @return array{0: mixed, 1: mixed}
+     */
+    protected function schedule(EngineState $state, PauseReason $reason): array
+    {
+        $config = config('ai-visibility.reliability', []);
+
+        return match ($reason) {
+            PauseReason::InsufficientCredits => [now()->addMinutes((int) ($config['credits_probe_minutes'] ?? 360)), null],
+            PauseReason::RateLimited => [null, now()->addMinutes((int) ($config['degraded_minutes'] ?? 5))],
+            PauseReason::ProviderOutage => [now()->addMinutes($this->outagePauseMinutes($state)), null],
+            default => [null, null],
+        };
     }
 
     public function resume(string $engine): void

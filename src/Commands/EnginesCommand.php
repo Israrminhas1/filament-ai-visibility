@@ -6,31 +6,56 @@ use Illuminate\Console\Command;
 use IsrarMinhas\FilamentAiVisibility\Engines\EngineManager;
 use IsrarMinhas\FilamentAiVisibility\Engines\KeyResolver;
 
+/**
+ * In a multi-tenant install this acts on every tenant, or on one with --tenant.
+ */
 class EnginesCommand extends Command
 {
     protected $signature = 'ai-visibility:engines
         {--test : Test every enabled engine\'s key}
-        {--resume= : Test an engine and resume it if the test passes}';
+        {--resume= : Test an engine and resume it if the test passes}
+        {--tenant= : Only this tenant (multi-tenant installs)}';
 
     protected $description = 'Show, test or resume AI Visibility engines';
 
     public function handle(EngineManager $engines, KeyResolver $keys): int
     {
-        if ($engine = $this->option('resume')) {
-            if (! $engines->registry()->has($engine)) {
-                $this->components->error("Unknown engine [{$engine}].");
+        if (($engine = $this->option('resume')) && ! $engines->registry()->has($engine)) {
+            $this->components->error("Unknown engine [{$engine}].");
 
-                return self::FAILURE;
-            }
-
-            $result = $engines->testAndResume($engine);
-            $result->ok
-                ? $this->components->info("{$engine} resumed.")
-                : $this->components->error("{$engine} is still paused: {$result->message}");
-
-            return $result->ok ? self::SUCCESS : self::FAILURE;
+            return self::FAILURE;
         }
 
+        $ok = true;
+
+        $engines->forEachTenant($this->option('tenant'), function (int | string | null $tenant) use ($engines, $keys, $engine, &$ok) {
+            $prefix = $tenant !== null ? "[tenant {$tenant}] " : '';
+
+            if ($engine) {
+                $result = $engines->testAndResume($engine);
+                $result->ok
+                    ? $this->components->info("{$prefix}{$engine} resumed.")
+                    : $this->components->error("{$prefix}{$engine} is still paused: {$result->message}");
+                $ok = $ok && $result->ok;
+
+                return;
+            }
+
+            if ($tenant !== null) {
+                $this->components->twoColumnDetail("<fg=gray>Tenant</>", (string) $tenant);
+            }
+
+            $this->table(['Engine', 'Enabled', 'Key from', 'State', $this->option('test') ? 'Test' : ''], $this->rows($engines, $keys));
+        });
+
+        return $ok ? self::SUCCESS : self::FAILURE;
+    }
+
+    /**
+     * @return array<int, array<int, string>>
+     */
+    protected function rows(EngineManager $engines, KeyResolver $keys): array
+    {
         $enabled = $engines->enabled();
         $rows = [];
 
@@ -47,8 +72,6 @@ class EnginesCommand extends Command
             ];
         }
 
-        $this->table(['Engine', 'Enabled', 'Key from', 'State', $this->option('test') ? 'Test' : ''], $rows);
-
-        return self::SUCCESS;
+        return $rows;
     }
 }

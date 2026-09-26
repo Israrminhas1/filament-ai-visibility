@@ -190,7 +190,7 @@ describe('prompt generation', function () {
         $existing = ['What is the best CRM for small marketing agencies?'];
 
         expect($gate->check('CRM?', $this->brand, PromptIntent::Discovery, []))->toContain('Too short')
-            ->and($gate->check('CRM software for agencies in London', $this->brand, PromptIntent::Discovery, []))->toContain('Not a question')
+            ->and($gate->check('Our agency has used spreadsheets for years and the whole team finds them slow to update every single week', $this->brand, PromptIntent::Discovery, []))->toContain('Not a question')
             ->and($gate->check('Is Acme good for agencies?', $this->brand, PromptIntent::Discovery, []))->toContain('Names the brand')
             ->and($gate->check('Is Acme good for agencies?', $this->brand, PromptIntent::Branded, []))->toBeNull()
             ->and($gate->check('What is the best CRM for small marketing agencies', $this->brand, PromptIntent::Discovery, $existing))->toContain('Duplicate')
@@ -210,6 +210,7 @@ describe('prompt generation', function () {
             ['reviews' => [
                 ['id' => 0, 'score' => 5, 'reason' => 'Very realistic'],
                 ['id' => 1, 'score' => 3, 'reason' => 'A bit vague'],
+                ['id' => 3, 'score' => 2, 'reason' => 'Too broad'],
             ]],
         )]);
 

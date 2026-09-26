@@ -1,5 +1,6 @@
 <?php
 
+use Carbon\CarbonImmutable;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Mail;
 use IsrarMinhas\FilamentAiVisibility\Alerts\AlertEvaluator;
@@ -40,6 +41,43 @@ function answerAt($test, $prompt, bool $mentioned, $ranAt, string $engine = 'ope
     }
 
     return $result;
+}
+
+/**
+ * Start a new run: the answers stored next belong to it.
+ */
+function newRun($test, $brand = null, RunStatus $status = RunStatus::Completed): Run
+{
+    return $test->run = Run::query()->create(['brand_id' => ($brand ?? $test->brand)->id, 'status' => $status, 'results_total' => 0]);
+}
+
+/**
+ * Store a run with one answer per sample for the test prompt.
+ *
+ * @param  array<bool>  $samples
+ */
+function runWith($test, array $samples, $ranAt, RunStatus $status = RunStatus::Completed): void
+{
+    newRun($test, status: $status);
+
+    foreach ($samples as $mentioned) {
+        answerAt($test, $test->prompt, $mentioned, $ranAt);
+    }
+}
+
+/**
+ * Visibility falls from 100% to 0% for a brand.
+ */
+function dropFor($brand, $prompt): void
+{
+    $run = Run::query()->create(['brand_id' => $brand->id, 'results_total' => 0]);
+
+    foreach ([[true, now()->subDays(10)], [false, now()->subDay()]] as [$mentioned, $ranAt]) {
+        Result::query()->create([
+            'run_id' => $run->id, 'brand_id' => $brand->id, 'prompt_id' => $prompt->id, 'engine' => 'openai',
+            'status' => ResultStatus::Success, 'brand_mentioned' => $mentioned, 'ran_at' => $ranAt,
+        ]);
+    }
 }
 
 function rule(AlertType $type, array $config = [], $brand = null, array $channels = ['database']): AlertRule
@@ -109,8 +147,11 @@ describe('alert rules', function () {
 
     it('alerts when a prompt stops mentioning the brand', function () {
         rule(AlertType::PromptLost, ['previous' => 2], $this->brand);
+        newRun($this);
         answerAt($this, $this->prompt, true, now()->subDays(3));
+        newRun($this);
         answerAt($this, $this->prompt, true, now()->subDays(2));
+        newRun($this);
         answerAt($this, $this->prompt, false, now()->subDay());
         answerAt($this, $this->prompt, false, now()->subDay(), 'gemini');
 
@@ -236,12 +277,170 @@ describe('scheduled reports', function () {
 
         expect(app(ReportSender::class)->send($this->schedule))->toBeFalse()
             ->and($this->schedule->fresh()->last_error)->toBe('SMTP down')
-            ->and(AlertEvent::query()->value('type'))->toBe('report_failed');
+            ->and($this->schedule->fresh()->next_send_at->isFuture())->toBeTrue()
+            ->and($this->schedule->fresh()->is_active)->toBeTrue()
+            ->and(AlertEvent::query()->count())->toBe(0);
     });
 
     it('only attaches PDFs when dompdf is installed', function () {
         $mail = new ReportMail(app(ReportBuilder::class)->forSchedule($this->schedule), attachPdf: true);
 
         expect($mail->attachments())->toHaveCount(ReportMail::canMakePdf() ? 1 : 0);
+    });
+});
+
+describe('all-brands alert rules', function () {
+    beforeEach(function () {
+        $this->other = $this->createBrand(['name' => 'Other', 'domains' => ['other.com']]);
+        $this->otherPrompt = $this->other->prompts()->create(['text' => 'Best ERP?']);
+    });
+
+    it('keeps the episode and cooldown per brand', function () {
+        rule(AlertType::VisibilityDrop, ['days' => 7, 'points' => 20]);
+        dropFor($this->brand, $this->prompt);
+        dropFor($this->other, $this->otherPrompt);
+
+        expect($this->evaluator->evaluate($this->brand))->toBe(1)
+            ->and($this->evaluator->evaluate($this->other))->toBe(1)
+            ->and($this->evaluator->evaluate($this->brand))->toBe(0)
+            ->and($this->evaluator->evaluate($this->other))->toBe(0)
+            ->and(AlertEvent::query()->pluck('brand_id')->sort()->values()->all())->toBe(collect([$this->brand->id, $this->other->id])->sort()->values()->all());
+    });
+
+    it('finds new competitors per brand', function () {
+        rule(AlertType::NewCompetitor)->forceFill(['created_at' => now()->subDay()])->save();
+
+        $candidate = fn ($brand, $name) => Candidate::query()->create(['brand_id' => $brand->id, 'key' => 'name:' . strtolower($name), 'kind' => 'name', 'name' => $name, 'answers' => 2, 'status' => 'classified', 'label' => CompetitorLabel::DirectCompetitor, 'classified_at' => now()->subHour()]);
+        $candidate($this->brand, 'Hooli');
+        $candidate($this->other, 'Initech');
+
+        expect($this->evaluator->evaluate($this->brand, only: [AlertType::NewCompetitor]))->toBe(1)
+            ->and($this->evaluator->evaluate($this->other, only: [AlertType::NewCompetitor]))->toBe(1)
+            ->and(AlertEvent::query()->orderBy('id')->pluck('title')->all())->toBe(['Acme: 1 new direct competitor found', 'Other: 1 new direct competitor found']);
+    });
+});
+
+describe('prompt lost with several samples', function () {
+    beforeEach(function () {
+        rule(AlertType::PromptLost, ['previous' => 1], $this->brand);
+    });
+
+    it('ignores one sample without the brand when another has it', function () {
+        runWith($this, [true, true], now()->subDays(2));
+        runWith($this, [false, true], now()->subDay());
+
+        expect($this->evaluator->evaluate($this->brand))->toBe(0);
+    });
+
+    it('fires when every sample of the latest run misses the brand', function () {
+        runWith($this, [false, true], now()->subDays(2));
+        runWith($this, [false, false], now()->subDay());
+
+        expect($this->evaluator->evaluate($this->brand))->toBe(1);
+    });
+
+    it('does not fire when the previous run also missed the brand', function () {
+        runWith($this, [false, false], now()->subDays(2));
+        runWith($this, [false, false], now()->subDay());
+
+        expect($this->evaluator->evaluate($this->brand))->toBe(0);
+    });
+
+    it('waits for a run in progress to finish', function () {
+        runWith($this, [true, true], now()->subDays(2));
+        runWith($this, [false], now()->subHour(), RunStatus::Running);
+
+        expect($this->evaluator->evaluate($this->brand))->toBe(0);
+    });
+});
+
+describe('queue stall on a fresh install', function () {
+    it('waits 30 minutes after install before reporting a queue that never ran', function () {
+        app(Settings::class)->record();
+
+        expect(app(StallWatcher::class)->checkQueue())->toBeFalse();
+
+        $this->travel(31)->minutes();
+        expect(app(StallWatcher::class)->checkQueue())->toBeTrue()
+            ->and(AlertEvent::query()->value('body'))->toContain('No queued job has ever been processed');
+    });
+});
+
+describe('report schedules', function () {
+    beforeEach(function () {
+        // A Monday.
+        $this->travelTo(CarbonImmutable::parse('2026-09-07 08:00:00'));
+        $this->schedule = ReportSchedule::query()->create([
+            'brand_id' => $this->brand->id, 'name' => 'Weekly', 'frequency' => 'weekly',
+            'recipients' => ['ceo@example.com'], 'next_send_at' => now()->subMinute(),
+        ]);
+    });
+
+    it('covers the 7 whole days before the send day', function () {
+        // The send day itself is left out.
+        answerAt($this, $this->prompt, true, now()->subHour());
+        answerAt($this, $this->prompt, false, now()->subDays(3));
+
+        $report = app(ReportBuilder::class)->forSchedule($this->schedule);
+
+        expect($report['from']->toDateTimeString())->toBe('2026-08-31 00:00:00')
+            ->and($report['until']->toDateTimeString())->toBe('2026-09-06 23:59:59')
+            ->and($report['days'])->toBe(7)
+            ->and($report['summary']['answers'])->toBe(1);
+    });
+
+    it('covers the previous calendar month for monthly reports', function () {
+        $this->schedule->update(['frequency' => 'monthly']);
+        $sendDay = CarbonImmutable::parse('2026-03-01 08:00');
+
+        [$from, $until] = $this->schedule->period($sendDay);
+
+        expect($from->toDateTimeString())->toBe('2026-02-01 00:00:00')
+            ->and($until->toDateTimeString())->toBe('2026-02-28 23:59:59')
+            ->and($this->schedule->periodDays($sendDay))->toBe(28);
+    });
+
+    it('moves the next send when the frequency changes', function () {
+        $this->schedule->update(['frequency' => 'monthly']);
+
+        expect($this->schedule->fresh()->next_send_at->toDateTimeString())->toBe('2026-10-01 08:00:00');
+
+        $this->schedule->update(['name' => 'Renamed']);
+        expect($this->schedule->fresh()->next_send_at->toDateTimeString())->toBe('2026-10-01 08:00:00');
+    });
+
+    it('claims a due report so only one server sends it', function () {
+        $first = ReportSchedule::query()->find($this->schedule->id);
+        $second = ReportSchedule::query()->find($this->schedule->id);
+
+        expect(app(ReportSender::class)->sendDue($first))->toBeTrue()
+            ->and(app(ReportSender::class)->sendDue($second))->toBeNull();
+
+        Mail::assertSentCount(1);
+    });
+
+    it('pauses a report after 3 failures in a row and alerts once', function () {
+        Mail::shouldReceive('to')->andThrow(new RuntimeException('SMTP down'));
+        $sender = app(ReportSender::class);
+
+        foreach (range(1, 3) as $attempt) {
+            expect($sender->send($this->schedule))->toBeFalse();
+        }
+
+        expect($this->schedule->fresh()->is_active)->toBeFalse()
+            ->and(AlertEvent::query()->where('type', 'report_failed')->count())->toBe(1)
+            ->and(AlertEvent::query()->value('title'))->toBe('Report "Weekly" was paused');
+
+        // Turning it back on starts the count again.
+        $this->schedule->update(['is_active' => true]);
+        expect($this->schedule->failures())->toBe(0);
+    });
+
+    it('skips reports for inactive brands', function () {
+        $this->brand->update(['is_active' => false]);
+
+        $this->artisan('ai-visibility:send-reports')->assertSuccessful();
+
+        Mail::assertNothingSent();
     });
 });

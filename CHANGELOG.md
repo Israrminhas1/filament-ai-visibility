@@ -1,5 +1,20 @@
 # Changelog
 
+## Unreleased — Review fixes before 1.0
+
+An independent review of every module found about 30 issues; all blocking ones are fixed.
+
+- Detection: legal names ("Nintendo Co., Ltd.") now match everyday use ("Nintendo"); the longest name wins when a competitor contains the brand name; Chinese, Japanese, Korean and Thai names are found; curly apostrophes, emails and bare domains handled; tracking parameters removed from sources.
+- Past answers are checked again automatically when a brand's names or domains or its competitors change (`ai-visibility:redetect`), keeping their analysis.
+- Answers list and answer page redesigned: rendered answer with highlighted brand and competitors, summary strip, ranked mentions, sources split into cited and read.
+- API keys: Settings tab renamed "Engines & API keys", remove-key action, one shared SerpAPI key field, links from Health, the paused-engine banner and key alerts.
+- Permissions: `->authorizeUsing()` and `->canManageSettings()` plugin options; alert-recipient picker scoped to the tenant (`->alertRecipientsQuery()`); navigation split into Reports, Tracking and Admin groups.
+- Competitors: "Discover now" and "Classify again" run in the background; no cross-tenant evidence; safe website fetching (no private addresses, checked redirects, size cap); the brand's own products and common platforms are no longer candidates; accent-insensitive candidate keys (MySQL).
+- Runs: no stuck runs (`ai-visibility:sweep-runs`), no double-paid answers, rate-limit pacing for large runs, budgets include the cost of runs still in progress, cost estimates learn from real averages.
+- Engines: "Test & resume" keeps the automatic check, outage back-off doubles, manual and budget pauses are never lifted by a success, throttled pause alerts, Gemini rate limits no longer read as "no credits", Claude's text before a search is its own paragraph.
+- Reports and alerts: "All brands" rules alert per brand, share of voice counts tracked brands only, "prompt lost" compares whole runs, calendar-month and full-week report periods, no double sends, dark-mode colours.
+- Keywords: Excel (BOM) and Windows-1252 CSVs import correctly, imports are all-or-nothing, generated prompts never contain the brand name unless branded prompts were asked for, SerpAPI seed loop fixed.
+
 ## Unreleased — Milestone 8 (1.0)
 
 - Google AI Overviews and Google AI Mode engines through SerpAPI, sharing one key (`AI_VISIBILITY_SERPAPI_KEY`). Separately loaded overviews are fetched automatically; searches without an AI answer are recorded, not failed. Key and quota problems pause the engines like any other.

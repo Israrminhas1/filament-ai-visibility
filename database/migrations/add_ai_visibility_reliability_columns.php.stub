@@ -1,0 +1,46 @@
+<?php
+
+use Illuminate\Database\Migrations\Migration;
+use Illuminate\Database\Schema\Blueprint;
+use Illuminate\Support\Facades\Schema;
+
+return new class extends Migration
+{
+    protected function table(string $name): string
+    {
+        return config('ai-visibility.table_prefix', 'ai_visibility_') . $name;
+    }
+
+    public function up(): void
+    {
+        // Consecutive failed sends; the schedule pauses after 3.
+        Schema::table($this->table('report_schedules'), function (Blueprint $table) {
+            $table->unsignedTinyInteger('failures')->default(0)->after('last_error');
+        });
+
+        // Alert rules look up the latest event per rule and brand.
+        Schema::table($this->table('alert_events'), function (Blueprint $table) {
+            $table->index(['alert_rule_id', 'brand_id', 'id']);
+        });
+
+        // Reports filter mentions by answer and subject (PostgreSQL doesn't index foreign keys itself).
+        Schema::table($this->table('mentions'), function (Blueprint $table) {
+            $table->index(['result_id', 'subject_type', 'subject_id']);
+        });
+    }
+
+    public function down(): void
+    {
+        Schema::table($this->table('mentions'), function (Blueprint $table) {
+            $table->dropIndex(['result_id', 'subject_type', 'subject_id']);
+        });
+
+        Schema::table($this->table('alert_events'), function (Blueprint $table) {
+            $table->dropIndex(['alert_rule_id', 'brand_id', 'id']);
+        });
+
+        Schema::table($this->table('report_schedules'), function (Blueprint $table) {
+            $table->dropColumn('failures');
+        });
+    }
+};

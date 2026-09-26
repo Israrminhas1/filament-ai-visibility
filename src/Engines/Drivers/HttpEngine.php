@@ -94,6 +94,25 @@ abstract class HttpEngine implements Engine
     }
 
     /**
+     * Send a batch status or results request. A 404 there means the batch or its
+     * file is gone (expired, deleted), which fails that poll, not the engine.
+     *
+     * @param  callable(): Response  $send
+     */
+    protected function sendBatchRequest(callable $send): Response
+    {
+        try {
+            return $this->send($send);
+        } catch (EngineRequestFailed $e) {
+            if ($e->status === 404) {
+                throw new EngineRequestFailed($e->getMessage(), null, $e->retryAfter, $e->status);
+            }
+
+            throw $e;
+        }
+    }
+
+    /**
      * Send a tracked prompt with web search enabled.
      */
     abstract protected function sendAsk(PendingRequest $http, EngineRequest $request): Response;
@@ -124,8 +143,13 @@ abstract class HttpEngine implements Engine
      */
     public static function classifyFailure(Response $response): ?PauseReason
     {
-        $body = strtolower($response->body());
         $status = $response->status();
+
+        if ($status >= 400 && $status < 500 && ($reason = static::classifyErrorFields($response))) {
+            return $reason;
+        }
+
+        $body = strtolower($response->body());
 
         $billing = str_contains($body, 'insufficient_quota')
             || str_contains($body, 'billing')
@@ -148,6 +172,43 @@ abstract class HttpEngine implements Engine
             $status === 400 && $billing => PauseReason::InsufficientCredits,
             $status === 400 && $badModel => PauseReason::ModelUnavailable,
             $status >= 500 => PauseReason::ProviderOutage,
+            default => null,
+        };
+    }
+
+    /**
+     * The provider's own error code, when it has one, says more than the wording:
+     * OpenAI-style `error.code`/`error.type`, Anthropic `error.type` and Google `error.status`.
+     */
+    protected static function classifyErrorFields(Response $response): ?PauseReason
+    {
+        $error = $response->json('error');
+
+        if (! is_array($error)) {
+            return null;
+        }
+
+        $code = strtolower((string) ($error['code'] ?? ''));
+        $type = strtolower((string) ($error['type'] ?? ''));
+        $googleStatus = strtoupper((string) ($error['status'] ?? ''));
+        $message = strtolower((string) ($error['message'] ?? ''));
+
+        if ($googleStatus === 'RESOURCE_EXHAUSTED') {
+            // Google words its per-minute limits as "exceeded your current quota…
+            // plan and billing details", so only an explicit account problem means credits.
+            $noCredits = preg_match('/\b(prepay\w*|prepaid|credits?|trial)\b[^.]*\b(depleted|exhausted|expired|used up|run out)\b/', $message)
+                || preg_match('/billing (is |has )?not (been )?enabled|enable billing/', $message)
+                // A quota of zero means the model needs a paid plan: waiting won't help.
+                || preg_match('/\blimit: 0\b/', $message);
+
+            return $noCredits ? PauseReason::InsufficientCredits : PauseReason::RateLimited;
+        }
+
+        return match (true) {
+            $code === 'insufficient_quota', $type === 'insufficient_quota', $type === 'billing_error' => PauseReason::InsufficientCredits,
+            $code === 'rate_limit_exceeded', $type === 'rate_limit_error' => PauseReason::RateLimited,
+            $code === 'invalid_api_key', $type === 'authentication_error', $googleStatus === 'UNAUTHENTICATED' => PauseReason::InvalidKey,
+            $code === 'model_not_found' => PauseReason::ModelUnavailable,
             default => null,
         };
     }

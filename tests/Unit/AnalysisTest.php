@@ -112,6 +112,88 @@ describe('answer analysis', function () {
             ->and($result->fresh()->analysis_status)->toBe('done');
     });
 
+    it('retries a batch with a broken reply one answer at a time instead of stalling', function () {
+        app(KeyResolver::class)->store('openai', 'sk');
+        $first = analysedAnswer($this, $this->p1, 'openai', [], analysis: 'pending');
+        $second = analysedAnswer($this, $this->p2, 'openai', [], analysis: 'pending');
+
+        $broken = Http::response(['output' => [['type' => 'message', 'content' => [['type' => 'output_text', 'text' => '{"answers": [{"id": 1, "mentions": [']]]], 'usage' => ['input_tokens' => 1, 'output_tokens' => 1]]);
+
+        Http::fake(['api.openai.com/*' => Http::sequence()
+            ->pushResponse($broken)
+            ->pushResponse(openAiJson(['answers' => [['id' => $first->id, 'mentions' => []]]]))
+            ->pushResponse($broken)
+            ->pushResponse($broken)
+            ->pushResponse($broken)]);
+
+        expect(app(AnswerAnalyzer::class)->analyze($this->brand))->toBe(1)
+            ->and($first->fresh()->analysis_status)->toBe('done')
+            ->and($second->fresh()->analysis_status)->toBe('retry:1');
+
+        app(AnswerAnalyzer::class)->analyze($this->brand);
+        app(AnswerAnalyzer::class)->analyze($this->brand);
+
+        expect($second->fresh()->analysis_status)->toBe(AnswerAnalyzer::FAILED);
+
+        // Failed answers are not picked up again.
+        expect(app(AnswerAnalyzer::class)->analyze($this->brand))->toBe(0);
+        Http::assertSentCount(5);
+    });
+
+    it('gives up on answers the helper keeps leaving out', function () {
+        app(KeyResolver::class)->store('openai', 'sk');
+        $result = analysedAnswer($this, $this->p1, 'openai', [], analysis: 'pending');
+
+        Http::fake(['api.openai.com/*' => openAiJson(['answers' => []])]);
+
+        app(AnswerAnalyzer::class)->analyze($this->brand);
+        expect($result->fresh()->analysis_status)->toBe('retry:1');
+
+        app(AnswerAnalyzer::class)->analyze($this->brand);
+        app(AnswerAnalyzer::class)->analyze($this->brand);
+        expect($result->fresh()->analysis_status)->toBe('failed');
+    });
+
+    it('works through the backlog oldest first after new answers', function () {
+        app(KeyResolver::class)->store('openai', 'sk');
+        $old = analysedAnswer($this, $this->p1, 'openai', [], analysis: 'deferred');
+        $newer = analysedAnswer($this, $this->p2, 'openai', [], analysis: 'retry:1');
+
+        $pendingId = $newer->id + 1;
+
+        Http::fake(['api.openai.com/*' => Http::sequence()
+            ->pushResponse(openAiJson(['answers' => [['id' => $old->id, 'mentions' => []], ['id' => $newer->id, 'mentions' => []]]]))
+            ->pushResponse(openAiJson(['answers' => [['id' => $pendingId, 'mentions' => []]]]))]);
+
+        expect(app(AnswerAnalyzer::class)->analyze($this->brand, limit: 1))->toBe(1)
+            ->and($old->fresh()->analysis_status)->toBe('done')
+            ->and($newer->fresh()->analysis_status)->toBe('retry:1');
+
+        $pending = analysedAnswer($this, $this->p3, 'openai', [], analysis: 'pending');
+        expect($pending->id)->toBe($pendingId);
+
+        expect(app(AnswerAnalyzer::class)->analyze($this->brand, limit: 1))->toBe(1)
+            ->and($pending->fresh()->analysis_status)->toBe('done');
+    });
+
+    it('scales the reply size with the batch', function () {
+        expect(AnswerAnalyzer::maxTokens(1))->toBe(2000)
+            ->and(AnswerAnalyzer::maxTokens(5))->toBe(3000)
+            ->and(AnswerAnalyzer::maxTokens(20))->toBe(8000);
+    });
+
+    it('maps the short form of a legal name back to the brand', function () {
+        app(KeyResolver::class)->store('openai', 'sk');
+        $this->brand->update(['name' => 'Acme, Inc.']);
+        $result = analysedAnswer($this, $this->p1, 'openai', [['brand', $this->brand->id, 1, null, null, null]], analysis: 'pending');
+
+        Http::fake(['api.openai.com/*' => openAiJson(['answers' => [['id' => $result->id, 'mentions' => [['name' => 'Acme', 'sentiment' => 'positive']]]]])]);
+
+        app(AnswerAnalyzer::class)->analyze($this->brand->fresh());
+
+        expect($result->fresh()->brand_sentiment)->toBe('positive');
+    });
+
     it('runs analysis in the pipeline without a separate extraction call', function () {
         app(KeyResolver::class)->store('openai', 'sk');
         app(Settings::class)->set(['discovery' => ['classify' => false]]);

@@ -64,12 +64,15 @@ class RunPlanner
         }
 
         $samples = max(1, min(5, (int) $brand->setting('runs.samples', 1)));
-        $estimate = CostEstimator::costPerRun($prompts->count(), $engines, $samples);
+        $models = array_combine($engines, array_map(fn (string $engine) => $this->engines->model($engine, $brand), $engines));
+        $estimate = CostEstimator::costPerRun($prompts->count(), $engines, $samples, $models);
+
+        // What is left after this month's spending and the expected cost of runs still in progress.
         $remaining = $this->spend->remaining($brand);
 
         if ($remaining !== null && $estimate > $remaining && $this->settings->get('budget.stop_at_budget', true)) {
             throw new RunNotStarted(sprintf(
-                'This run would cost about %s, but only %s of the monthly budget is left.',
+                'This run would cost about %s, but only %s of the monthly budget is left (after runs in progress).',
                 CostEstimator::format($estimate),
                 CostEstimator::format($remaining),
             ));
@@ -163,20 +166,24 @@ class RunPlanner
     {
         $economy = app(Economy::class);
         $batched = [];
+        $realtime = [];
 
         $run->results()
             ->where('status', ResultStatus::Pending)
             ->select(['id', 'engine'])
             ->orderBy('id')
-            ->each(function (Result $result) use ($run, $economy, $realtimeOnly, &$batched) {
+            ->each(function (Result $result) use ($run, $economy, $realtimeOnly, &$batched, &$realtime) {
                 if (! $realtimeOnly && $economy->applies($run, $result->engine)) {
                     $batched[$result->engine][] = $result->getKey();
-
-                    return;
+                } else {
+                    $realtime[$result->engine][] = $result->getKey();
                 }
-
-                RunResultJob::dispatch($result->getKey(), $result->engine, $run->tenant_id);
             });
+
+        // Spread out at each engine's requests-per-minute (see RunResultJob::dispatchPaced()).
+        foreach ($realtime as $engine => $ids) {
+            RunResultJob::dispatchPaced($ids, $engine, $run->tenant_id);
+        }
 
         foreach ($batched as $engine => $ids) {
             foreach (array_chunk($ids, (int) config('ai-visibility.economy.max_batch_size', 1000)) as $chunk) {

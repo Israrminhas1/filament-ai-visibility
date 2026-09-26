@@ -3,6 +3,8 @@
 namespace IsrarMinhas\FilamentAiVisibility\Competitors;
 
 use Illuminate\Support\Collection;
+use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\Log;
 use IsrarMinhas\FilamentAiVisibility\Enums\ResultStatus;
 use IsrarMinhas\FilamentAiVisibility\Models\Brand;
 use IsrarMinhas\FilamentAiVisibility\Models\Result;
@@ -18,6 +20,11 @@ use IsrarMinhas\FilamentAiVisibility\Support\Text;
  */
 class NameExtractor
 {
+    /**
+     * Answers whose extraction reply keeps failing are given up on after this many tries.
+     */
+    public const MAX_ATTEMPTS = 3;
+
     public function __construct(
         protected HelperAi $helper,
         protected Instructions $instructions,
@@ -42,30 +49,51 @@ class NameExtractor
             ->get(['id', 'answer', 'brand_id']);
 
         $known = $this->knownNames($brand);
+        $done = 0;
 
         foreach ($results->chunk((int) config('ai-visibility.discovery.extraction_batch', 8)) as $batch) {
-            $this->extractBatch($brand, $batch, $known);
+            $done += $this->extractBatch($brand, $batch, $known);
         }
 
-        return $results->count();
+        return $done;
     }
 
     /**
      * @param  Collection<int, Result>  $batch
      * @param  array<string, true>  $known
      */
-    protected function extractBatch(Brand $brand, Collection $batch, array $known): void
+    protected function extractBatch(Brand $brand, Collection $batch, array $known): int
     {
         $answers = $batch->map(fn (Result $result) => "ANSWER id={$result->id}\n" . mb_substr((string) $result->answer, 0, 3000))->implode("\n\n");
 
-        $data = $this->helper->json(
+        $data = $this->helper->complete(
             Usage::PURPOSE_ANALYSIS,
             $this->instructions->render(Instructions::EXTRACTION, ['brand' => $brand->name, 'answers' => $answers]),
             $brand,
             maxTokens: 2000,
-        );
+            json: true,
+        )->json();
 
-        $namesById = collect($data['answers'] ?? [])->mapWithKeys(fn ($row) => [(int) ($row['id'] ?? 0) => (array) ($row['names'] ?? [])]);
+        // One bad reply only skips this batch; it is tried again next time, up to a limit.
+        if (! is_array($data)) {
+            Log::info("AI Visibility: name extraction reply for {$brand->name} was not valid JSON; skipped {$batch->count()} answers.");
+
+            foreach ($batch as $result) {
+                $key = 'ai-visibility:extract-attempts:' . $result->id;
+                $attempts = (int) Cache::get($key, 0) + 1;
+                Cache::put($key, $attempts, now()->addDays(30));
+
+                if ($attempts >= self::MAX_ATTEMPTS) {
+                    $result->forceFill(['entities_extracted_at' => now()])->save();
+                }
+            }
+
+            return 0;
+        }
+
+        $namesById = collect(is_array($data['answers'] ?? null) ? $data['answers'] : [])
+            ->filter(fn ($row) => is_array($row))
+            ->mapWithKeys(fn ($row) => [(int) ($row['id'] ?? 0) => (array) ($row['names'] ?? [])]);
 
         foreach ($batch as $result) {
             $seen = [];
@@ -75,7 +103,7 @@ class NameExtractor
                 $name = Text::squish(is_string($name) ? $name : '');
                 $key = Text::normalize($name);
 
-                if ($name === '' || mb_strlen($name) > 80 || isset($known[$key]) || isset($seen[$key])) {
+                if ($name === '' || mb_strlen($name) > 80 || isset($known[$key]) || isset($seen[$key]) || NoiseFilter::isOwnName($brand, $name)) {
                     continue;
                 }
 
@@ -98,6 +126,8 @@ class NameExtractor
 
             $result->forceFill(['entities_extracted_at' => now()])->save();
         }
+
+        return $batch->count();
     }
 
     /**

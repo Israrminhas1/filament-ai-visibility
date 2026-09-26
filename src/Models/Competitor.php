@@ -2,6 +2,7 @@
 
 namespace IsrarMinhas\FilamentAiVisibility\Models;
 
+use IsrarMinhas\FilamentAiVisibility\Jobs\RedetectBrandJob;
 use IsrarMinhas\FilamentAiVisibility\Models\Concerns\BelongsToBrand;
 use IsrarMinhas\FilamentAiVisibility\Support\Limits;
 
@@ -39,6 +40,15 @@ class Competitor extends Model
             if (blank($competitor->color)) {
                 $count = static::withoutGlobalScopes()->where('brand_id', $competitor->brand_id)->count();
                 $competitor->color = static::PALETTE[$count % count(static::PALETTE)];
+            }
+        });
+
+        // Past answers are re-checked so reports include (or drop) this competitor.
+        static::created(fn (Competitor $competitor) => RedetectBrandJob::dispatchFor($competitor->brand));
+        static::deleted(fn (Competitor $competitor) => RedetectBrandJob::dispatchFor($competitor->brand));
+        static::updated(function (Competitor $competitor) {
+            if ($competitor->wasChanged(['name', 'aliases', 'domains', 'exclusions', 'is_active'])) {
+                RedetectBrandJob::dispatchFor($competitor->brand);
             }
         });
     }

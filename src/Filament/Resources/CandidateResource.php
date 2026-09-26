@@ -18,12 +18,12 @@ use Filament\Tables\Table;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Collection;
 use IsrarMinhas\FilamentAiVisibility\Competitors\CandidateActions;
-use IsrarMinhas\FilamentAiVisibility\Competitors\Classifier;
+use IsrarMinhas\FilamentAiVisibility\Competitors\CandidateNotOpen;
 use IsrarMinhas\FilamentAiVisibility\Enums\CompetitorLabel;
-use IsrarMinhas\FilamentAiVisibility\Exceptions\HelperUnavailable;
 use IsrarMinhas\FilamentAiVisibility\Exceptions\LimitExceeded;
 use IsrarMinhas\FilamentAiVisibility\Filament\Concerns\HasAiVisibilityNavigation;
 use IsrarMinhas\FilamentAiVisibility\Filament\Resources\CandidateResource\Pages;
+use IsrarMinhas\FilamentAiVisibility\Jobs\ClassifyCandidatesJob;
 use IsrarMinhas\FilamentAiVisibility\Models\Candidate;
 
 class CandidateResource extends Resource
@@ -208,6 +208,8 @@ class CandidateResource extends Resource
                                     Notification::make()->title('Limit reached')->body($e->getMessage())->warning()->send();
 
                                     break;
+                                } catch (CandidateNotOpen) {
+                                    // Handled meanwhile, e.g. by someone else.
                                 }
                             }
 
@@ -218,19 +220,16 @@ class CandidateResource extends Resource
                         ->label('Classify again')
                         ->icon('heroicon-o-sparkles')
                         ->action(function (Collection $records) {
-                            $count = 0;
-
-                            try {
-                                foreach ($records->groupBy('brand_id') as $candidates) {
-                                    $count += app(Classifier::class)->classify($candidates->first()->brand, $candidates->values());
-                                }
-                            } catch (HelperUnavailable $e) {
-                                Notification::make()->title('Could not classify')->body($e->getMessage())->warning()->send();
-
-                                return;
+                            // Runs on the queue: classification calls the AI and can take a while.
+                            foreach ($records->groupBy('brand_id') as $brandId => $candidates) {
+                                ClassifyCandidatesJob::dispatch((int) $brandId, $candidates->first()->tenant_id, $candidates->map->getKey()->values()->all());
                             }
 
-                            Notification::make()->title("Classified {$count} candidates")->success()->send();
+                            Notification::make()
+                                ->title('Classification started in the background')
+                                ->body("{$records->count()} candidates will be classified in a few minutes.")
+                                ->success()
+                                ->send();
                         })
                         ->deselectRecordsAfterCompletion(),
                     BulkAction::make('rejectSelected')
@@ -257,6 +256,10 @@ class CandidateResource extends Resource
             $competitor = app(CandidateActions::class)->accept($record);
         } catch (LimitExceeded $e) {
             Notification::make()->title('Limit reached')->body($e->getMessage())->warning()->persistent()->send();
+
+            return;
+        } catch (CandidateNotOpen $e) {
+            Notification::make()->title('Already handled')->body($e->getMessage())->warning()->send();
 
             return;
         }

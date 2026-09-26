@@ -42,7 +42,9 @@ class Discovery
         $maxAnswers = max(1, (int) collect($groups)->max(fn ($g) => count($g['answers'])));
         $maxPrompts = max(1, (int) collect($groups)->max(fn ($g) => count($g['prompts'])));
 
-        $existing = Candidate::query()->where('brand_id', $brand->getKey())->get()->keyBy('key');
+        // Matched the way MySQL's unique index compares them: "pokémon" and "pokemon" are one key.
+        $existing = Candidate::query()->where('brand_id', $brand->getKey())->get()
+            ->keyBy(fn (Candidate $candidate) => static::keyFor($candidate->key));
 
         foreach ($groups as $key => $group) {
             $candidate = $existing->get($key) ?? new Candidate([
@@ -121,6 +123,7 @@ class Discovery
             ->get(["{$mentions}.name_matched as name", "{$mentions}.position", "{$results}.id as result_id", "{$results}.prompt_id", "{$results}.engine", "{$results}.ran_at"]);
 
         $nameKeys = [];
+        $noise = [];
 
         foreach ($names as $row) {
             $normalized = Text::normalize($row->name);
@@ -129,7 +132,14 @@ class Discovery
                 continue;
             }
 
-            $key = 'name:' . $normalized;
+            // The brand's own products ("Nintendo Switch") and platforms ("Reddit") are never competitors.
+            $noise[$normalized] ??= NoiseFilter::isOwnName($brand, $row->name) || NoiseFilter::isPlatformName($row->name, $excluded);
+
+            if ($noise[$normalized]) {
+                continue;
+            }
+
+            $key = static::keyFor('name:' . $normalized);
             $nameKeys[str_replace(' ', '', $normalized)] = $key;
             $this->add($groups, $key, 'name', $row->name, null, $row);
         }
@@ -145,13 +155,18 @@ class Discovery
         foreach ($domains as $row) {
             $domain = strtolower((string) $row->domain);
 
-            if ($domain === '' || Domains::matches('https://' . $domain, $excluded)) {
+            if ($domain === '' || Domains::matches('https://' . $domain, $excluded) || NoiseFilter::isOwnDomain($brand, $domain)) {
                 continue;
             }
 
             // "globex.io" joins the "Globex" name candidate; "monday.com" joins "Monday.com".
             $label = explode('.', $domain)[0];
             $key = $nameKeys[$label] ?? $nameKeys[str_replace('.', '', $domain)] ?? 'domain:' . $domain;
+
+            // Review sites, forums and publishers are not candidates on their own.
+            if (str_starts_with($key, 'domain:') && NoiseFilter::nonCompetitorCategory($domain)) {
+                continue;
+            }
 
             $this->add($groups, $key, str_starts_with($key, 'name:') ? 'name' : 'domain', $domain, $domain, $row);
         }
@@ -218,8 +233,7 @@ class Discovery
     protected function excludedDomains(Brand $brand): array
     {
         $domains = [
-            ...config('ai-visibility.discovery.ignored_domains', []),
-            ...(array) $this->settings->get('discovery.ignored_domains', []),
+            ...NoiseFilter::ignoredDomains(),
             ...($brand->domains ?? []),
         ];
 
@@ -242,5 +256,15 @@ class Discovery
         }
 
         return collect($names)->mapWithKeys(fn ($name) => [Text::normalize($name) => true])->all();
+    }
+
+    /**
+     * A candidate key without accents in the name part ("name:pokemon").
+     */
+    public static function keyFor(string $key): string
+    {
+        return str_starts_with($key, 'name:')
+            ? 'name:' . Text::foldKey(substr($key, 5))
+            : $key;
     }
 }

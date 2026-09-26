@@ -114,7 +114,7 @@ class ConnectionResource extends Resource
                         }),
                     EditAction::make()
                         ->fillForm(fn (Connection $record) => static::fillData($record))
-                        ->using(fn (Connection $record, array $data) => static::save($data, $record)),
+                        ->using(fn (Connection $record, array $data) => static::saveEdit($record, $data)),
                     DeleteAction::make(),
                 ]),
             ])
@@ -156,8 +156,51 @@ class ConnectionResource extends Resource
             'config' => array_filter((array) ($data['config'] ?? []), fn ($value) => $value !== null && $value !== ''),
         ]);
 
-        $record->credentials = [...($record->credentials ?? []), ...$credentials];
+        $stored = $record->credentials ?? [];
+        $changed = $record->exists && collect($credentials)->contains(fn ($value, $key) => ($stored[$key] ?? null) !== $value);
+
+        $record->credentials = [...$stored, ...$credentials];
+
+        // New credentials clear an old failure and are tried on the next scheduled sync.
+        if ($changed && $record->status !== Connection::DISABLED) {
+            $record->forceFill([
+                'status' => Connection::CONNECTED,
+                'last_error' => null,
+                'next_sync_at' => now(),
+            ]);
+        }
+
         $record->save();
+
+        return $record;
+    }
+
+    /**
+     * Saves an edit; when the credentials changed they are tested straight away.
+     *
+     * @param  array<string, mixed>  $data
+     */
+    public static function saveEdit(Connection $record, array $data): Connection
+    {
+        $before = $record->credentials ?? [];
+        $record = static::save($data, $record);
+
+        if ($record->credentials !== $before && app(KeywordSourceRegistry::class)->has($record->type)) {
+            $result = app(KeywordSourceRegistry::class)->get($record->type)->test($record);
+
+            if (! $result->ok) {
+                $record->forceFill([
+                    'status' => $result->credentialsRejected ? Connection::NEEDS_REAUTH : Connection::ERROR,
+                    'last_error' => SourceFailed::redact($result->message),
+                ])->save();
+            }
+
+            Notification::make()
+                ->title($result->ok ? 'Saved and connected' : 'Saved, but the test failed')
+                ->body($result->message)
+                ->status($result->ok ? 'success' : 'warning')
+                ->send();
+        }
 
         return $record;
     }

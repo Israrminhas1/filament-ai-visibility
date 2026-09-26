@@ -303,6 +303,10 @@ return [
         'extraction_batch' => 8,
         // Answers per analysis request.
         'analysis_batch' => 5,
+        // Failed attempts before an answer's analysis is marked failed.
+        'analysis_attempts' => 3,
+        // Days before retrying a candidate the AI could not label.
+        'retry_failed_days' => 7,
         // How candidates are scored (0–100). Weights are relative.
         'weights' => [
             'answers' => 0.35,
@@ -331,6 +335,18 @@ return [
         'max_searches' => 5,
         // Seconds a job may keep retrying (rate limits, outages) before giving up.
         'retry_for_seconds' => 3600,
+        // Hours without progress before a run's unanswered results are failed and the run is closed.
+        'stale_run_hours' => 6,
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
+    | Alerts
+    |--------------------------------------------------------------------------
+    */
+    'alerts' => [
+        // At most one "engine paused" alert per engine and reason in this many hours (0 = no limit).
+        'engine_alert_throttle_hours' => 6,
     ],
 
     /*

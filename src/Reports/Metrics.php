@@ -63,6 +63,10 @@ class Metrics
         ];
     }
 
+    /**
+     * Spend for the brand and engine in the period. Usage is not recorded per
+     * prompt, so this is never narrowed to a topic.
+     */
     public function spend(ReportFilters $filters): float
     {
         return (float) Usage::query()
@@ -73,7 +77,37 @@ class Metrics
     }
 
     /**
-     * Share of voice: of all answers mentioning any tracked brand, how often each one appears.
+     * IDs of the brand's active competitors: only they count in share of voice
+     * and the leaderboard.
+     *
+     * @return array<int>
+     */
+    public function trackedCompetitorIds(ReportFilters $filters): array
+    {
+        return $filters->brand->competitors()->where('is_active', true)->pluck('id')->map(fn ($id) => (int) $id)->all();
+    }
+
+    /**
+     * Limit a mentions query to the brand and its active competitors, leaving
+     * out untracked names (entities) and paused competitors.
+     *
+     * @param  Builder|\Illuminate\Database\Query\Builder  $query
+     */
+    public function whereTracked($query, ReportFilters $filters): void
+    {
+        $mentions = Model::prefixedTable('mentions');
+        $competitors = $this->trackedCompetitorIds($filters);
+
+        $query->where(fn ($query) => $query
+            ->where("{$mentions}.subject_type", 'brand')
+            ->when($competitors !== [], fn ($query) => $query->orWhere(fn ($query) => $query
+                ->where("{$mentions}.subject_type", 'competitor')
+                ->whereIn("{$mentions}.subject_id", $competitors))));
+    }
+
+    /**
+     * Share of voice: of all mentions of the brand and its active competitors,
+     * how many are each one's. Matches the competitor leaderboard.
      *
      * @return Collection<int, array{type: string, id: ?int, name: string, color: string, answers: int, share: float}>
      */
@@ -82,13 +116,14 @@ class Metrics
         $mentions = Model::prefixedTable('mentions');
         $results = Model::prefixedTable('results');
 
-        $rows = ResultMention::query()
+        $query = ResultMention::query()
             ->whereIn("{$mentions}.result_id", $this->results($filters)->select("{$results}.id"))
             ->groupBy("{$mentions}.subject_type", "{$mentions}.subject_id")
-            ->selectRaw("{$mentions}.subject_type as type, {$mentions}.subject_id as subject_id, COUNT(DISTINCT {$mentions}.result_id) as answers")
-            ->toBase()
-            ->get();
+            ->selectRaw("{$mentions}.subject_type as type, {$mentions}.subject_id as subject_id, COUNT(DISTINCT {$mentions}.result_id) as answers");
 
+        $this->whereTracked($query, $filters);
+
+        $rows = $query->toBase()->get();
         $total = max(1, (int) $rows->sum('answers'));
         $competitors = $filters->brand->competitors()->get()->keyBy('id');
 
@@ -318,7 +353,8 @@ class Metrics
     }
 
     /**
-     * Visibility and change per topic, weakest first.
+     * Visibility and change per topic, weakest first. Read in three grouped
+     * queries for all topics at once.
      *
      * @return Collection<int, array{topic_id: ?int, name: string, prompts: int, answers: int, visibility: ?float, change: ?float, share_of_voice: ?float}>
      */
@@ -326,24 +362,84 @@ class Metrics
     {
         $topics = $filters->brand->topics()->withCount('prompts')->orderBy('name')->get();
 
+        if ($topics->isEmpty()) {
+            return collect();
+        }
+
+        $now = $this->visibilityByTopic($filters);
+        $before = $this->visibilityByTopic($filters->previous());
+        $sov = $this->shareOfVoiceByTopic($filters);
+
         return $topics
-            ->map(function ($topic) use ($filters) {
-                $scoped = new ReportFilters($filters->brand, $filters->from, $filters->until, $filters->engine, $topic->getKey());
-                $now = $this->summary($scoped);
-                $before = $this->summary($scoped->previous());
+            ->map(function ($topic) use ($now, $before, $sov) {
+                $id = (int) $topic->getKey();
+                $answers = $now[$id]['answers'] ?? 0;
+                $visibility = $now[$id]['visibility'] ?? null;
+                $previous = $before[$id]['visibility'] ?? null;
 
                 return [
                     'topic_id' => $topic->getKey(),
                     'name' => $topic->name,
                     'prompts' => $topic->prompts_count,
-                    'answers' => $now['answers'],
-                    'visibility' => $now['visibility'],
-                    'change' => $now['visibility'] !== null && $before['visibility'] !== null ? round($now['visibility'] - $before['visibility'], 1) : null,
-                    'share_of_voice' => $now['share_of_voice'],
+                    'answers' => $answers,
+                    'visibility' => $visibility,
+                    'change' => $visibility !== null && $previous !== null ? round($visibility - $previous, 1) : null,
+                    'share_of_voice' => $sov[$id] ?? ($answers ? 0.0 : null),
                 ];
             })
             ->sortBy(fn ($row) => $row['visibility'] ?? 101)
             ->values();
+    }
+
+    /**
+     * @return Collection<int, array{answers: int, visibility: float}> keyed by topic ID
+     */
+    protected function visibilityByTopic(ReportFilters $filters): Collection
+    {
+        $results = Model::prefixedTable('results');
+        $prompts = Model::prefixedTable('prompts');
+
+        return $this->results($filters)
+            ->toBase()
+            ->join($prompts, "{$prompts}.id", '=', "{$results}.prompt_id")
+            ->whereNotNull("{$prompts}.topic_id")
+            ->selectRaw("{$prompts}.topic_id as topic_id, COUNT(*) as answers, SUM(CASE WHEN {$results}.brand_mentioned = ? THEN 1 ELSE 0 END) as mentioned", [true])
+            ->groupBy("{$prompts}.topic_id")
+            ->get()
+            ->mapWithKeys(fn ($row) => [(int) $row->topic_id => [
+                'answers' => (int) $row->answers,
+                'visibility' => round((int) $row->mentioned / max(1, (int) $row->answers) * 100, 1),
+            ]]);
+    }
+
+    /**
+     * The brand's share of voice per topic.
+     *
+     * @return Collection<int, float> keyed by topic ID
+     */
+    protected function shareOfVoiceByTopic(ReportFilters $filters): Collection
+    {
+        $results = Model::prefixedTable('results');
+        $mentions = Model::prefixedTable('mentions');
+        $prompts = Model::prefixedTable('prompts');
+
+        $query = $this->results($filters)
+            ->toBase()
+            ->join($mentions, "{$mentions}.result_id", '=', "{$results}.id")
+            ->join($prompts, "{$prompts}.id", '=', "{$results}.prompt_id")
+            ->whereNotNull("{$prompts}.topic_id")
+            ->selectRaw("{$prompts}.topic_id as topic_id, {$mentions}.subject_type as type, COUNT(DISTINCT {$mentions}.result_id) as answers")
+            ->groupBy("{$prompts}.topic_id", "{$mentions}.subject_type", "{$mentions}.subject_id");
+
+        $this->whereTracked($query, $filters);
+
+        return $query->get()
+            ->groupBy('topic_id')
+            ->mapWithKeys(function (Collection $rows, $topicId) {
+                $brand = (int) $rows->where('type', 'brand')->sum('answers');
+
+                return [(int) $topicId => round($brand / max(1, (int) $rows->sum('answers')) * 100, 1)];
+            });
     }
 
     protected function dateExpression(): string

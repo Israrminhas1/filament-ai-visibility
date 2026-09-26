@@ -4,6 +4,10 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>AI visibility report: {{ $brand->name }}</title>
+    @if (! empty($forPdf))
+        {{-- dompdf's built-in fonts have no arrows or accents; DejaVu Sans ships with it. --}}
+        <style>* { font-family: 'DejaVu Sans', sans-serif !important; }</style>
+    @endif
 </head>
 <body style="margin: 0; padding: 0; background: #f4f5f7; font-family: -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif; color: #111827; font-size: 14px; line-height: 1.5;">
 <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background: #f4f5f7;">
@@ -37,7 +41,7 @@
                                             <div style="font-size: 12px; color: #6b7280;">{{ $label }}</div>
                                             <div style="font-size: 24px; font-weight: 700;">{{ $now !== null ? $now . $unit : '—' }}</div>
                                             @if ($change !== null)
-                                                <div style="font-size: 12px; color: {{ $change >= 0 ? '#059669' : '#dc2626' }};">{{ $change >= 0 ? '▲ +' : '▼ ' }}{{ $change }} pts</div>
+                                                <div style="font-size: 12px; color: {{ $change > 0 ? '#047857' : ($change < 0 ? '#b91c1c' : '#6b7280') }};">{{ $change > 0 ? '▲ +' . $change : ($change < 0 ? '▼ −' . abs($change) : '= 0') }} pts</div>
                                             @endif
                                         </td>
                                         @if (! $loop->last)<td width="8"></td>@endif
@@ -101,10 +105,10 @@
                     <tr>
                         <td style="padding: 0 28px 8px; font-size: 13px;">
                             @foreach ($gained ?? [] as $row)
-                                <div style="padding: 4px 0; border-top: 1px solid #e5e7eb;"><span style="color: #059669;">▲ +{{ $row['change'] }}</span> {{ $row['text'] }}</div>
+                                <div style="padding: 4px 0; border-top: 1px solid #e5e7eb;"><span style="color: #047857;">▲ +{{ $row['change'] }}</span> {{ $row['text'] }}</div>
                             @endforeach
                             @foreach ($lost ?? [] as $row)
-                                <div style="padding: 4px 0; border-top: 1px solid #e5e7eb;"><span style="color: #dc2626;">▼ {{ $row['change'] }}</span> {{ $row['text'] }}</div>
+                                <div style="padding: 4px 0; border-top: 1px solid #e5e7eb;"><span style="color: #b91c1c;">▼ −{{ abs($row['change']) }}</span> {{ $row['text'] }}</div>
                             @endforeach
                             @if (empty($gained) && empty($lost))
                                 <div style="color: #6b7280;">No prompt changed visibility vs the previous period.</div>

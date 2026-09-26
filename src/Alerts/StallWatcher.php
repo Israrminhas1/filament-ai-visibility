@@ -2,6 +2,8 @@
 
 namespace IsrarMinhas\FilamentAiVisibility\Alerts;
 
+use Carbon\CarbonInterface;
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Cache;
 use IsrarMinhas\FilamentAiVisibility\AiVisibilityPlugin;
 use IsrarMinhas\FilamentAiVisibility\Filament\Pages\Health;
@@ -19,6 +21,11 @@ use IsrarMinhas\FilamentAiVisibility\Support\Tenancy;
  */
 class StallWatcher
 {
+    /**
+     * Minutes after install before a queue that never ran is reported.
+     */
+    public const GRACE_MINUTES = 30;
+
     public function __construct(
         protected AlertNotifier $notifier,
     ) {}
@@ -32,6 +39,11 @@ class StallWatcher
         $critical = (int) config('ai-visibility.health.queue_critical_after', 60);
 
         if ($last && $last->gt(now()->subMinutes($critical))) {
+            return false;
+        }
+
+        // A fresh install gets time to start its worker before "never processed" is a problem.
+        if (! $last && ! $this->installedBefore(now()->subMinutes(self::GRACE_MINUTES))) {
             return false;
         }
 
@@ -54,6 +66,20 @@ class StallWatcher
         }
 
         $this->alert('scheduler', 'The Laravel scheduler has stopped', 'The scheduler last ran ' . $last->diffForHumans() . ', so no scheduled tracking is happening. Check the cron entry: * * * * * php artisan schedule:run');
+    }
+
+    /**
+     * Whether the plugin was installed before the given time, judged by the
+     * oldest settings record or heartbeat.
+     */
+    protected function installedBefore(CarbonInterface $time): bool
+    {
+        $installed = collect([
+            SettingsRecord::query()->withoutGlobalScopes()->min('created_at'),
+            Heartbeat::query()->min('beat_at'),
+        ])->filter()->map(fn ($value) => Carbon::parse($value))->min();
+
+        return $installed !== null && $installed->lte($time);
     }
 
     protected function alertAll(string $what, string $title, string $body): void

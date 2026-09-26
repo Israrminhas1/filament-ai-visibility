@@ -7,6 +7,7 @@ use Filament\Forms\Components\TextInput;
 use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Http\Client\Response;
 use Illuminate\Support\Facades\Http;
+use IsrarMinhas\FilamentAiVisibility\Enums\KeywordSource as KeywordSourceEnum;
 use IsrarMinhas\FilamentAiVisibility\Keywords\Contracts\KeywordSource;
 use IsrarMinhas\FilamentAiVisibility\Keywords\KeywordData;
 use IsrarMinhas\FilamentAiVisibility\Keywords\SourceFailed;
@@ -77,22 +78,28 @@ class SerpApiPeopleAlsoAsk implements KeywordSource
 
     public function fetch(Connection $connection): iterable
     {
-        $seeds = array_values(array_filter((array) $connection->setting('seeds', [])));
+        $max = max(1, (int) $connection->setting('max_seeds', 10));
+        $seeds = array_values(array_filter((array) $connection->setting('seeds', []), fn ($seed) => is_string($seed) && trim($seed) !== ''));
 
         if ($seeds === []) {
+            // Not questions this source found itself, or each sync would feed on the last one.
             $seeds = Keyword::query()
                 ->where('brand_id', $connection->brand_id)
                 ->where('status', 'active')
                 ->where('is_branded', false)
-                ->where('source', '!=', $this->key())
+                ->whereNotIn('source', [KeywordSourceEnum::SerpApiPaa->value, $this->key()])
+                // Keywords with metrics first (NULLs last on every database).
+                ->orderByRaw('search_volume is null')
                 ->orderByDesc('search_volume')
+                ->orderByRaw('impressions is null')
                 ->orderByDesc('impressions')
-                ->limit((int) $connection->setting('max_seeds', 10))
+                ->orderBy('id')
+                ->limit($max)
                 ->pluck('keyword')
                 ->all();
         }
 
-        $seeds = array_slice($seeds, 0, (int) $connection->setting('max_seeds', 10));
+        $seeds = array_slice($seeds, 0, $max);
 
         if ($seeds === []) {
             throw new SourceFailed('Add seed keywords to this connection, or add keywords to the brand first.');
@@ -103,21 +110,28 @@ class SerpApiPeopleAlsoAsk implements KeywordSource
         foreach ($seeds as $seed) {
             $response = $this->search($connection, $seed, $country);
 
+            if ($response === null) {
+                continue;
+            }
+
             foreach ((array) $response->json('related_questions', []) as $item) {
-                if (filled($item['question'] ?? null)) {
+                if (is_array($item) && is_string($item['question'] ?? null) && filled($item['question'])) {
                     yield new KeywordData($item['question'], metadata: ['seed' => $seed, 'type' => 'people_also_ask']);
                 }
             }
 
             foreach ((array) $response->json('related_searches', []) as $item) {
-                if (filled($item['query'] ?? null)) {
+                if (is_array($item) && is_string($item['query'] ?? null) && filled($item['query'])) {
                     yield new KeywordData($item['query'], metadata: ['seed' => $seed, 'type' => 'related_search']);
                 }
             }
         }
     }
 
-    protected function search(Connection $connection, string $query, ?string $country): Response
+    /**
+     * The search results, or null when Google found nothing for the seed.
+     */
+    protected function search(Connection $connection, string $query, ?string $country): ?Response
     {
         try {
             $response = Http::timeout(60)->get('https://serpapi.com/search.json', array_filter([
@@ -127,11 +141,19 @@ class SerpApiPeopleAlsoAsk implements KeywordSource
                 'api_key' => $connection->credential('api_key'),
             ]));
         } catch (ConnectionException $e) {
-            throw new SourceFailed('Could not reach SerpAPI: ' . $e->getMessage());
+            // The exception message quotes the URL, which includes the API key.
+            throw new SourceFailed('Could not reach SerpAPI.', previous: $e);
         }
 
-        if ($response->failed() || $response->json('error')) {
-            throw new SourceFailed('SerpAPI: ' . ($response->json('error') ?? 'HTTP ' . $response->status()), in_array($response->status(), [401, 403], true));
+        $error = $response->json('error');
+
+        // "Google hasn't returned any results for this query." is a normal, empty answer.
+        if ($response->successful() && is_string($error) && str_contains(strtolower($error), 'returned any results')) {
+            return null;
+        }
+
+        if ($response->failed() || $error) {
+            throw new SourceFailed('SerpAPI: ' . (is_string($error) ? $error : 'HTTP ' . $response->status()), in_array($response->status(), [401, 403], true));
         }
 
         return $response;

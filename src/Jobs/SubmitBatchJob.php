@@ -21,7 +21,11 @@ class SubmitBatchJob implements ShouldQueue
     use InteractsWithQueue;
     use Queueable;
 
-    public int $tries = 2;
+    /**
+     * Never retried: a second attempt could send a second paid batch for the same
+     * results. Anything that goes wrong is answered in real time by failed().
+     */
+    public int $tries = 1;
 
     /**
      * @param  array<int>  $resultIds
@@ -52,6 +56,13 @@ class SubmitBatchJob implements ShouldQueue
      */
     public function failed(?Throwable $exception): void
     {
-        Tenancy::as($this->tenantId, fn () => app(Economy::class)->realtime($this->resultIds, $this->engine, $this->tenantId));
+        Tenancy::as($this->tenantId, function () {
+            $economy = app(Economy::class);
+
+            // Results the provider already has are answered by that batch, not again in real time.
+            $unsent = array_values(array_diff($this->resultIds, $economy->inOpenBatch($this->runId, $this->resultIds)));
+
+            $economy->realtime($unsent, $this->engine, $this->tenantId);
+        });
     }
 }

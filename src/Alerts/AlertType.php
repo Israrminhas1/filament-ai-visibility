@@ -45,7 +45,7 @@ enum AlertType: string implements HasDescription, HasLabel
             self::VisibilityDrop => 'Visibility over the last N days falls by more than X points vs the N days before.',
             self::CompetitorOvertakes => 'A competitor is mentioned in more answers than you over the last N days.',
             self::NewCompetitor => 'A discovered candidate is classified as a direct competitor.',
-            self::PromptLost => 'You were mentioned in the last few answers to a prompt on an engine, then not in the latest one.',
+            self::PromptLost => 'You were mentioned in the last few runs of a prompt on an engine, then in none of the answers in the latest run.',
             self::NegativeSentiment => 'The share of negative mentions of your brand over the last N days exceeds X%.',
             self::BudgetThreshold => 'This month\'s spend passes X% of the monthly budget (once per month).',
             self::RunFailed => 'A run fails, or more than X% of its answers fail or are skipped.',
@@ -95,7 +95,7 @@ enum AlertType: string implements HasDescription, HasLabel
                     ->options(fn (Get $get) => Competitor::query()->where('brand_id', $get('brand_id'))->pluck('name', 'id')),
             ],
             self::PromptLost => [
-                TextInput::make('config.previous')->label('Mentioned in at least this many answers before')->numeric()->minValue(1)->default(2),
+                TextInput::make('config.previous')->label('Mentioned in at least this many runs before')->numeric()->minValue(1)->default(2),
             ],
             self::NegativeSentiment => [
                 TextInput::make('config.days')->label('Over the last (days)')->numeric()->minValue(1)->default(7),

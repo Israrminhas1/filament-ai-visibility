@@ -2,8 +2,10 @@
 
 namespace IsrarMinhas\FilamentAiVisibility\Engines;
 
+use Illuminate\Support\Facades\Log;
 use IsrarMinhas\FilamentAiVisibility\Models\ProviderKey;
 use IsrarMinhas\FilamentAiVisibility\Support\AiMonitor;
+use Throwable;
 
 /**
  * Finds the API key for an engine: the plugin's own stored key first, then
@@ -39,8 +41,8 @@ class KeyResolver
             ->where('is_active', true)
             ->first();
 
-        if ($stored && filled($stored->api_key)) {
-            return ['key' => $stored->api_key, 'source' => 'panel'];
+        if ($stored && filled($key = $this->decrypt($stored))) {
+            return ['key' => $key, 'source' => 'panel'];
         }
 
         if (AiMonitor::installed() && $this->engines->has($engine)) {
@@ -56,6 +58,20 @@ class KeyResolver
         }
 
         return ['key' => null, 'source' => null];
+    }
+
+    /**
+     * A key that can no longer be decrypted (the APP_KEY was rotated) counts as missing.
+     */
+    protected function decrypt(ProviderKey $stored): ?string
+    {
+        try {
+            return $stored->api_key;
+        } catch (Throwable $e) {
+            Log::warning("AI Visibility: the stored API key for [{$stored->engine}] could not be decrypted; add it again. " . $e->getMessage());
+
+            return null;
+        }
     }
 
     public function store(string $engine, string $apiKey): ProviderKey

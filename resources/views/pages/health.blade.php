@@ -54,15 +54,22 @@
                         @endif
                     </div>
 
-                    @if ($engine['enabled'])
-                        <div style="display: flex; gap: 0.5rem;">
-                            @if (! $engine['usable'])
-                                <x-filament::button size="sm" icon="heroicon-o-play" wire:click="testAndResume('{{ $engine['key'] }}')">
-                                    Test &amp; resume
-                                </x-filament::button>
-                            @else
-                                <x-filament::button size="sm" color="gray" icon="heroicon-o-pause" wire:click="pauseEngine('{{ $engine['key'] }}')">
-                                    Pause
+                    @if ($canManage)
+                        <div style="display: flex; flex-wrap: wrap; gap: 0.5rem;">
+                            @if ($engine['enabled'])
+                                @if (! $engine['usable'])
+                                    <x-filament::button size="sm" icon="heroicon-o-play" wire:click="testAndResume('{{ $engine['key'] }}')">
+                                        Test &amp; resume
+                                    </x-filament::button>
+                                @else
+                                    <x-filament::button size="sm" color="gray" icon="heroicon-o-pause" wire:click="pauseEngine('{{ $engine['key'] }}')">
+                                        Pause
+                                    </x-filament::button>
+                                @endif
+                            @endif
+                            @if ($settingsUrl)
+                                <x-filament::button tag="a" :href="$settingsUrl" size="sm" color="gray" icon="heroicon-o-key">
+                                    Change key / settings
                                 </x-filament::button>
                             @endif
                         </div>

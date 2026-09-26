@@ -17,7 +17,7 @@ class ResultsRelationManager extends RelationManager
 
     public function table(Table $table): Table
     {
-        return ResultResource::table($table)
+        return ResultResource::answersTable($table, inRun: true)
             ->poll('10s')
             ->recordActions([
                 Action::make('view')

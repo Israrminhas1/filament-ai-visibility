@@ -75,14 +75,14 @@ class PromptGenerator
 
         foreach (array_slice((array) ($data['prompts'] ?? []), 0, $count * 2) as $row) {
             $text = Text::squish(is_array($row) ? (string) ($row['text'] ?? '') : (string) $row);
-            $intent = PromptIntent::tryFrom((string) ($row['intent'] ?? '')) ?? $intents[0];
+            $intent = $this->intentFor($row, $text, $brand, $intents);
             $keyword = is_array($row) && is_string($row['keyword'] ?? null) ? $keywordsByText->get(Text::normalize($row['keyword'])) : null;
 
             if ($text === '') {
                 continue;
             }
 
-            $reason = $this->gate->check($text, $brand, $intent, $accepted);
+            $reason = $this->gate->check($text, $brand, $intent, $accepted, allowBrand: $intent === PromptIntent::Branded);
 
             if ($reason === null) {
                 $accepted[] = $text;
@@ -187,6 +187,28 @@ class PromptGenerator
             ->orderByDesc('impressions')
             ->limit($ids !== null ? count($ids) : max(10, $count * 2))
             ->get();
+    }
+
+    /**
+     * The intent the AI gave, if it was one of those requested; otherwise the
+     * first requested one. Branded is only ever used when it was requested.
+     *
+     * @param  array<PromptIntent>  $intents
+     */
+    protected function intentFor(mixed $row, string $text, Brand $brand, array $intents): PromptIntent
+    {
+        $intent = is_array($row) ? PromptIntent::tryFrom(strtolower((string) ($row['intent'] ?? ''))) : null;
+
+        if (! in_array($intent, $intents, true)) {
+            $intent = $intents[0];
+        }
+
+        // A question naming the brand is a branded one, when those were asked for.
+        if ($intent !== PromptIntent::Branded && in_array(PromptIntent::Branded, $intents, true) && Text::mentionsAny($text, $brand->names())) {
+            $intent = PromptIntent::Branded;
+        }
+
+        return $intent;
     }
 
     /**

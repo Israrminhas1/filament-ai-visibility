@@ -9,6 +9,9 @@ enum ResultStatus: string implements HasColor, HasLabel
 {
     case Pending = 'pending';
 
+    // Claimed by a worker that is asking the engine right now.
+    case Running = 'running';
+
     case Success = 'success';
 
     case Failed = 'failed';
@@ -19,6 +22,7 @@ enum ResultStatus: string implements HasColor, HasLabel
     {
         return match ($this) {
             self::Pending => 'Pending',
+            self::Running => 'Running',
             self::Success => 'Success',
             self::Failed => 'Failed',
             self::Skipped => 'Skipped',
@@ -29,6 +33,7 @@ enum ResultStatus: string implements HasColor, HasLabel
     {
         return match ($this) {
             self::Pending => 'gray',
+            self::Running => 'info',
             self::Success => 'success',
             self::Failed => 'danger',
             self::Skipped => 'warning',

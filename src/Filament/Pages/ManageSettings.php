@@ -3,6 +3,7 @@
 namespace IsrarMinhas\FilamentAiVisibility\Filament\Pages;
 
 use Filament\Actions\Action;
+use Filament\Facades\Filament;
 use Filament\Forms\Components\CheckboxList;
 use Filament\Forms\Components\Select;
 use Filament\Forms\Components\TagsInput;
@@ -20,6 +21,11 @@ use Filament\Schemas\Components\Tabs;
 use Filament\Schemas\Components\Tabs\Tab;
 use Filament\Schemas\Schema;
 use Filament\Support\Enums\Alignment;
+use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Relations\Relation;
+use Illuminate\Support\Facades\Schema as DatabaseSchema;
+use IsrarMinhas\FilamentAiVisibility\AiVisibilityPlugin;
 use IsrarMinhas\FilamentAiVisibility\Enums\PromptIntent;
 use IsrarMinhas\FilamentAiVisibility\Enums\RunFrequency;
 use IsrarMinhas\FilamentAiVisibility\Engines\EngineRegistry;
@@ -59,6 +65,31 @@ class ManageSettings extends Page
         return 'AI Visibility settings';
     }
 
+    public static function requiresSettingsAccess(): bool
+    {
+        return true;
+    }
+
+    /**
+     * URL of Settings with the "Engines & API keys" tab open.
+     */
+    public static function enginesUrl(): ?string
+    {
+        return AiVisibilityPlugin::pageUrl(static::class, parameters: ['tab' => 'engines']);
+    }
+
+    protected function getHeaderActions(): array
+    {
+        return [
+            Action::make('runSetup')
+                ->label('Run setup again')
+                ->icon('heroicon-o-rocket-launch')
+                ->color('gray')
+                ->url(fn () => AiVisibilityPlugin::pageUrl(Setup::class, parameters: ['restart' => 1]))
+                ->visible(fn () => AiVisibilityPlugin::current()?->hasSetupWizard() && Setup::canAccess()),
+        ];
+    }
+
     public function mount(): void
     {
         $settings = app(Settings::class);
@@ -82,7 +113,8 @@ class ManageSettings extends Page
             Tabs::make('settings')
                 ->persistTabInQueryString()
                 ->tabs([
-                    Tab::make('Engines')
+                    Tab::make('Engines & API keys')
+                        ->id('engines')
                         ->icon('heroicon-o-cpu-chip')
                         ->visible($includeEngines)
                         ->schema([
@@ -246,8 +278,6 @@ class ManageSettings extends Page
      */
     public static function alertComponents(): array
     {
-        $userModel = config('auth.providers.users.model');
-
         return [
             Toggle::make('alerts.database')
                 ->label('Show alerts in the panel')
@@ -255,10 +285,12 @@ class ManageSettings extends Page
             Select::make('alerts.user_ids')
                 ->label('Panel users who receive alerts')
                 ->multiple()
+                ->searchable()
                 ->visible(fn ($get) => (bool) $get('alerts.database'))
-                ->options(fn () => $userModel && class_exists($userModel)
-                    ? $userModel::query()->limit(200)->get()->mapWithKeys(fn ($user) => [$user->getKey() => $user->name ?? $user->email ?? $user->getKey()])->all()
-                    : []),
+                ->options(fn () => static::alertRecipientOptions())
+                ->getSearchResultsUsing(fn (string $search) => static::alertRecipientOptions($search))
+                ->getOptionLabelsUsing(fn (array $values) => static::recipientLabels(static::alertRecipientsQuery()?->whereKey($values)))
+                ->helperText('Type a name or email to find more users.'),
             TagsInput::make('alerts.emails')
                 ->label('Email alerts to')
                 ->placeholder('name@example.com')
@@ -268,6 +300,127 @@ class ManageSettings extends Page
                 ->url()
                 ->placeholder('https://hooks.slack.com/services/...'),
         ];
+    }
+
+    /**
+     * Users that can be picked as alert recipients. In order: the plugin's
+     * alertRecipientsQuery(), the current tenant's users or members, only the
+     * current user (tenancy without such a relationship), or every user.
+     *
+     * @return ?Builder<Model>
+     */
+    public static function alertRecipientsQuery(): ?Builder
+    {
+        $userModel = config('auth.providers.users.model');
+
+        if (! $userModel || ! class_exists($userModel)) {
+            return null;
+        }
+
+        $query = $userModel::query();
+        $tenant = static::currentTenant();
+
+        if ($callback = AiVisibilityPlugin::current()?->getAlertRecipientsQuery()) {
+            return $callback($query, $tenant) ?? $query;
+        }
+
+        if (! $tenant) {
+            return $query;
+        }
+
+        foreach (['users', 'members'] as $name) {
+            if (! method_exists($tenant, $name)) {
+                continue;
+            }
+
+            $relation = $tenant->{$name}();
+
+            if ($relation instanceof Relation && $relation->getRelated() instanceof $userModel) {
+                $key = $relation->getRelated()->getQualifiedKeyName();
+
+                return $query->whereIn($query->getModel()->getQualifiedKeyName(), $relation->getQuery()->select($key));
+            }
+        }
+
+        // A tenant without a users relationship: never offer other tenants' users.
+        return $query->whereKey(auth()->id());
+    }
+
+    /**
+     * Users to offer as alert recipients. Before searching: the tenant's users when
+     * the list is scoped, otherwise only the current user.
+     *
+     * @return array<int|string, string>
+     */
+    public static function alertRecipientOptions(?string $search = null): array
+    {
+        if (filled($search)) {
+            return static::recipientLabels(static::searchRecipients($search));
+        }
+
+        $query = static::alertRecipientsQuery();
+
+        return static::recipientLabels(static::recipientsAreScoped() ? $query?->limit(20) : $query?->whereKey(auth()->id()));
+    }
+
+    /**
+     * Whether the recipients are limited (a custom query or a tenant), so listing them is safe.
+     */
+    protected static function recipientsAreScoped(): bool
+    {
+        return AiVisibilityPlugin::current()?->getAlertRecipientsQuery() !== null || static::currentTenant() !== null;
+    }
+
+    protected static function currentTenant(): ?Model
+    {
+        try {
+            return Filament::hasTenancy() ? Filament::getTenant() : null;
+        } catch (\Throwable) {
+            return null;
+        }
+    }
+
+    /**
+     * @return ?Builder<Model>
+     */
+    protected static function searchRecipients(string $search): ?Builder
+    {
+        $query = static::alertRecipientsQuery();
+
+        if (! $query) {
+            return null;
+        }
+
+        $model = $query->getModel();
+        $columns = array_filter(['name', 'email'], fn (string $column) => DatabaseSchema::connection($model->getConnectionName())->hasColumn($model->getTable(), $column));
+        $like = '%' . str_replace(['%', '_'], ['\%', '\_'], $search) . '%';
+
+        return $query
+            ->where(function (Builder $query) use ($columns, $model, $like, $search) {
+                foreach ($columns as $column) {
+                    $query->orWhere($model->qualifyColumn($column), 'like', $like);
+                }
+
+                if (is_numeric($search)) {
+                    $query->orWhere($model->getQualifiedKeyName(), $search);
+                }
+            })
+            ->limit(20);
+    }
+
+    /**
+     * @param  ?Builder<Model>  $query
+     * @return array<int|string, string>
+     */
+    protected static function recipientLabels(?Builder $query): array
+    {
+        if (! $query) {
+            return [];
+        }
+
+        return $query->get()
+            ->mapWithKeys(fn ($user) => [$user->getKey() => (string) ($user->name ?? $user->email ?? $user->getKey())])
+            ->all();
     }
 
     public function form(Schema $schema): Schema

@@ -2,6 +2,8 @@
     <x-filament::section icon="heroicon-o-folder" heading="Visibility by topic">
         <x-slot name="description">Weakest topics first. Change is in points vs the previous period.</x-slot>
 
+        @include('ai-visibility::widgets.partials.styles')
+
         @if ($rows->isEmpty())
             <div style="opacity: 0.75;">No topics yet. Use "Organise into topics" on a brand, or add topics to prompts.</div>
         @else
@@ -13,13 +15,11 @@
                             <div style="font-size: 0.8rem; opacity: 0.7;">{{ $row['prompts'] }} prompts · {{ $row['answers'] }} answers</div>
                         </div>
                         <div style="height: 0.6rem; border-radius: 9999px; background: rgba(127,127,127,0.15);">
-                            <div style="height: 100%; width: {{ $row['visibility'] ?? 0 }}%; border-radius: 9999px; background: {{ ($row['visibility'] ?? 0) >= 50 ? '#10b981' : (($row['visibility'] ?? 0) >= 20 ? '#f59e0b' : '#ef4444') }};"></div>
+                            <div class="{{ ($row['visibility'] ?? 0) >= 50 ? 'aiv-bar-success' : (($row['visibility'] ?? 0) >= 20 ? 'aiv-bar-warning' : 'aiv-bar-danger') }}" style="height: 100%; width: {{ $row['visibility'] ?? 0 }}%; border-radius: 9999px;"></div>
                         </div>
                         <div style="text-align: right; white-space: nowrap;">
                             {{ $row['visibility'] !== null ? $row['visibility'] . '%' : '—' }}
-                            @if ($row['change'] !== null && $row['change'] != 0)
-                                <span style="font-size: 0.8rem; color: {{ $row['change'] > 0 ? '#059669' : '#dc2626' }};">{{ $row['change'] > 0 ? '▲' : '▼' }}{{ abs($row['change']) }}</span>
-                            @endif
+                            @include('ai-visibility::widgets.partials.change', ['change' => $row['change']])
                         </div>
                     </div>
                 @endforeach

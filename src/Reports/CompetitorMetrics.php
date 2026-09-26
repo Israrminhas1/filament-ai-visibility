@@ -2,6 +2,7 @@
 
 namespace IsrarMinhas\FilamentAiVisibility\Reports;
 
+use Illuminate\Database\Query\Builder;
 use Illuminate\Support\Collection;
 use IsrarMinhas\FilamentAiVisibility\Enums\Recommendation;
 use IsrarMinhas\FilamentAiVisibility\Enums\Sentiment;
@@ -13,8 +14,8 @@ use IsrarMinhas\FilamentAiVisibility\Models\ResultMention;
 
 /**
  * Brand-vs-competitor numbers: leaderboard, engine heatmap, sentiment,
- * head-to-head and opportunities. Built from the period's mentions in one
- * pass, so every view agrees with the others.
+ * head-to-head and opportunities. Only the brand and its active competitors
+ * count, so every view agrees with the others and with share of voice.
  */
 class CompetitorMetrics
 {
@@ -57,13 +58,13 @@ class CompetitorMetrics
         $data = $this->data($filters);
         $previous = $this->data($filters->previous());
         $total = max(1, $data['answers']);
-        $allMentions = max(1, collect($data['subjects'])->sum(fn ($s) => count($s['answers'])));
+        $allMentions = max(1, collect($data['subjects'])->sum('answers'));
 
         return $this->subjects($filters)
             ->map(function (array $subject) use ($data, $previous, $total, $allMentions) {
                 $stats = $data['subjects'][$subject['key']] ?? null;
-                $answers = $stats ? count($stats['answers']) : 0;
-                $before = $previous['answers'] ? count($previous['subjects'][$subject['key']]['answers'] ?? []) / $previous['answers'] * 100 : null;
+                $answers = $stats['answers'] ?? 0;
+                $before = $previous['answers'] ? ($previous['subjects'][$subject['key']]['answers'] ?? 0) / $previous['answers'] * 100 : null;
                 $analysed = $stats ? max(1, $stats['analysed']) : 1;
                 $visibility = round($answers / $total * 100, 1);
 
@@ -72,7 +73,7 @@ class CompetitorMetrics
                     'visibility' => $visibility,
                     'change' => $before === null ? null : round($visibility - $before, 1),
                     'share_of_voice' => round($answers / $allMentions * 100, 1),
-                    'avg_position' => $stats && $stats['positions'] ? round(array_sum($stats['positions']) / count($stats['positions']), 1) : null,
+                    'avg_position' => $stats && $stats['mentions'] ? round($stats['position_sum'] / $stats['mentions'], 1) : null,
                     'win_rate' => $answers ? round(($stats['first'] ?? 0) / $answers * 100, 1) : null,
                     'citation_rate' => round(($data['cited'][$subject['key']] ?? 0) / $total * 100, 1),
                     'net_sentiment' => $stats && $stats['analysed'] ? round((($stats['sentiment']['positive'] ?? 0) - ($stats['sentiment']['negative'] ?? 0)) / $analysed * 100) : null,
@@ -99,7 +100,7 @@ class CompetitorMetrics
 
             foreach ($engines as $engine) {
                 $answers = $data['engineAnswers'][$engine];
-                $mentioned = count($data['subjects'][$subject['key']]['engines'][$engine] ?? []);
+                $mentioned = $data['subjects'][$subject['key']]['engines'][$engine] ?? 0;
                 $cells[$engine] = $answers ? round($mentioned / $answers * 100) : null;
             }
 
@@ -120,7 +121,7 @@ class CompetitorMetrics
         $key = $competitorId ? "competitor:{$competitorId}" : 'brand:' . $filters->brand->getKey();
         $stats = $data['subjects'][$key] ?? null;
 
-        $descriptors = $stats['descriptors'] ?? [];
+        $descriptors = $stats ? $this->descriptors($filters, $competitorId) : [];
         arsort($descriptors);
 
         return [
@@ -139,11 +140,31 @@ class CompetitorMetrics
     public function headToHead(ReportFilters $filters, Competitor $competitor): array
     {
         $data = $this->data($filters);
-        $brandKey = 'brand:' . $filters->brand->getKey();
-        $rivalKey = "competitor:{$competitor->getKey()}";
+        $mentions = Model::prefixedTable('mentions');
+        $results = Model::prefixedTable('results');
 
-        $brandAnswers = $data['subjects'][$brandKey]['answers'] ?? [];
-        $rivalAnswers = $data['subjects'][$rivalKey]['answers'] ?? [];
+        $brandAnswers = [];
+        $rivalAnswers = [];
+        $promptOf = [];
+
+        // Only the answers naming either side are read.
+        $rows = $this->mentionRows($filters)
+            ->where(fn (Builder $query) => $query
+                ->where("{$mentions}.subject_type", 'brand')
+                ->orWhere(fn (Builder $query) => $query->where("{$mentions}.subject_type", 'competitor')->where("{$mentions}.subject_id", $competitor->getKey())))
+            ->get(["{$results}.id as result_id", "{$results}.prompt_id", "{$mentions}.subject_type", "{$mentions}.position"]);
+
+        foreach ($rows as $row) {
+            $resultId = (int) $row->result_id;
+            $promptOf[$resultId] = (int) $row->prompt_id;
+
+            if ($row->subject_type === 'brand') {
+                $brandAnswers[$resultId] = (int) $row->position;
+            } else {
+                $rivalAnswers[$resultId] = (int) $row->position;
+            }
+        }
+
         $both = array_intersect_key($brandAnswers, $rivalAnswers);
         $either = $brandAnswers + $rivalAnswers;
 
@@ -152,7 +173,6 @@ class CompetitorMetrics
         $rivalWins = 0;
 
         foreach ($either as $resultId => $_) {
-            $promptId = $data['results'][$resultId]['prompt_id'];
             $brandPosition = $brandAnswers[$resultId] ?? null;
             $rivalPosition = $rivalAnswers[$resultId] ?? null;
 
@@ -163,7 +183,7 @@ class CompetitorMetrics
             };
 
             $winner === 'brand' ? $brandWins++ : $rivalWins++;
-            $prompts[$promptId][$winner] = ($prompts[$promptId][$winner] ?? 0) + 1;
+            $prompts[$promptOf[$resultId]][$winner] = ($prompts[$promptOf[$resultId]][$winner] ?? 0) + 1;
         }
 
         $texts = Prompt::query()->whereKey(array_keys($prompts))->pluck('text', 'id');
@@ -175,7 +195,7 @@ class CompetitorMetrics
             'rival' => $wins['rival'] ?? 0,
         ]);
 
-        [$brandSources, $rivalSources] = [$this->domainsFor($filters, array_keys($brandAnswers)), $this->domainsFor($filters, array_keys($rivalAnswers))];
+        [$brandSources, $rivalSources] = [$this->domainsFor(array_keys($brandAnswers)), $this->domainsFor(array_keys($rivalAnswers))];
 
         return [
             'total' => $data['answers'],
@@ -197,37 +217,42 @@ class CompetitorMetrics
      */
     public function opportunities(ReportFilters $filters): array
     {
-        $data = $this->data($filters);
-        $brandKey = 'brand:' . $filters->brand->getKey();
+        $mentions = Model::prefixedTable('mentions');
+        $results = Model::prefixedTable('results');
         $names = $this->subjects($filters)->pluck('name', 'key');
 
-        $missed = [];
-
-        foreach ($data['results'] as $resultId => $result) {
-            if (isset($data['subjects'][$brandKey]['answers'][$resultId])) {
-                continue;
-            }
-
-            $rivals = array_keys(array_filter($data['subjects'], fn ($s, $key) => $key !== $brandKey && isset($s['answers'][$resultId]), ARRAY_FILTER_USE_BOTH));
-
-            if ($rivals) {
-                $missed[$resultId] = $rivals;
-            }
-        }
+        // Tracked competitors named in answers that do not name the brand.
+        $missed = fn () => $this->mentionRows($filters)
+            ->where("{$mentions}.subject_type", 'competitor')
+            ->whereNotIn("{$results}.id", ResultMention::query()
+                ->select('result_id')
+                ->where('subject_type', 'brand')
+                ->whereIn('result_id', $this->metrics->results($filters)->select("{$results}.id")));
 
         $byPrompt = [];
 
-        foreach ($missed as $resultId => $rivals) {
-            $result = $data['results'][$resultId];
-            $row = $byPrompt[$result['prompt_id']] ?? ['answers' => 0, 'engines' => [], 'rivals' => []];
-            $row['answers']++;
-            $row['engines'][$result['engine']] = true;
+        foreach ($missed()
+            ->selectRaw("{$results}.prompt_id as prompt_id, {$results}.engine as engine, {$mentions}.subject_id as subject_id, COUNT(DISTINCT {$results}.id) as answers")
+            ->groupBy("{$results}.prompt_id", "{$results}.engine", "{$mentions}.subject_id")
+            ->orderBy("{$results}.prompt_id")
+            ->get() as $row) {
+            $entry = $byPrompt[(int) $row->prompt_id] ?? ['answers' => 0, 'engines' => [], 'rivals' => []];
+            $entry['engines'][$row->engine] = true;
+            $entry['rivals']["competitor:{$row->subject_id}"] = ($entry['rivals']["competitor:{$row->subject_id}"] ?? 0) + (int) $row->answers;
+            $byPrompt[(int) $row->prompt_id] = $entry;
+        }
 
-            foreach ($rivals as $rival) {
-                $row['rivals'][$rival] = ($row['rivals'][$rival] ?? 0) + 1;
+        // Answers per prompt, each counted once however many competitors it names.
+        $answers = $missed()
+            ->selectRaw("{$results}.prompt_id as prompt_id, COUNT(DISTINCT {$results}.id) as answers")
+            ->groupBy("{$results}.prompt_id")
+            ->get()
+            ->pluck('answers', 'prompt_id');
+
+        foreach ($answers as $promptId => $count) {
+            if (isset($byPrompt[(int) $promptId])) {
+                $byPrompt[(int) $promptId]['answers'] = (int) $count;
             }
-
-            $byPrompt[$result['prompt_id']] = $row;
         }
 
         $texts = Prompt::query()->whereKey(array_keys($byPrompt))->pluck('text', 'id');
@@ -245,12 +270,22 @@ class CompetitorMetrics
             ];
         })->sortByDesc('score')->values();
 
-        $sources = $this->domainsFor($filters, array_keys($missed), withCategory: true);
+        $sources = Citation::query()
+            ->toBase()
+            ->whereIn('result_id', $missed()->select("{$results}.id"))
+            ->where('is_brand', false)
+            ->selectRaw('domain, MIN(category) as category, COUNT(DISTINCT result_id) as answers')
+            ->groupBy('domain')
+            ->orderByDesc('answers')
+            ->orderBy('domain')
+            ->limit(15)
+            ->get()
+            ->map(fn ($row) => ['domain' => $row->domain, 'category' => $row->category, 'answers' => (int) $row->answers]);
 
         return [
             'prompts' => $prompts,
-            'sources' => collect($sources)->values()->sortByDesc('answers')->values()->take(15),
-            'missed_answers' => count($missed),
+            'sources' => $sources,
+            'missed_answers' => (int) $answers->sum(),
         ];
     }
 
@@ -258,35 +293,78 @@ class CompetitorMetrics
      * Cited domains (not the brand's own) in the given answers.
      *
      * @param  array<int>  $resultIds
-     * @return array<string, int>|array<string, array{domain: string, category: ?string, answers: int}>
+     * @return array<string, int>
      */
-    protected function domainsFor(ReportFilters $filters, array $resultIds, bool $withCategory = false): array
+    protected function domainsFor(array $resultIds): array
     {
-        if ($resultIds === []) {
-            return [];
-        }
-
-        $rows = collect();
+        $domains = [];
 
         foreach (array_chunk($resultIds, 500) as $chunk) {
-            $rows = $rows->merge(Citation::query()
+            $rows = Citation::query()
+                ->toBase()
                 ->whereIn('result_id', $chunk)
                 ->where('is_brand', false)
-                ->toBase()
-                ->get(['domain', 'category', 'result_id']));
+                ->selectRaw('domain, COUNT(DISTINCT result_id) as answers')
+                ->groupBy('domain')
+                ->get();
+
+            foreach ($rows as $row) {
+                $domains[$row->domain] = ($domains[$row->domain] ?? 0) + (int) $row->answers;
+            }
         }
 
-        return $rows->groupBy('domain')->map(function (Collection $group, string $domain) use ($withCategory) {
-            $answers = $group->pluck('result_id')->unique()->count();
-
-            return $withCategory ? ['domain' => $domain, 'category' => $group->first()->category, 'answers' => $answers] : $answers;
-        })->all();
+        return $domains;
     }
 
     /**
-     * Everything needed for one period, read once.
+     * Mentions of the brand and its active competitors, joined to the period's answers.
+     */
+    protected function mentionRows(ReportFilters $filters): Builder
+    {
+        $mentions = Model::prefixedTable('mentions');
+        $results = Model::prefixedTable('results');
+
+        $query = $this->metrics->results($filters)
+            ->toBase()
+            ->join($mentions, "{$mentions}.result_id", '=', "{$results}.id");
+
+        $this->metrics->whereTracked($query, $filters);
+
+        return $query;
+    }
+
+    /**
+     * How often each descriptor is used for the brand or a competitor.
      *
-     * @return array{answers: int, results: array<int, array{prompt_id: int, engine: string}>, engineAnswers: array<string, int>, subjects: array<string, array>, cited: array<string, int>}
+     * @return array<string, int>
+     */
+    protected function descriptors(ReportFilters $filters, ?int $competitorId): array
+    {
+        $mentions = Model::prefixedTable('mentions');
+        $counts = [];
+
+        $this->mentionRows($filters)
+            ->where("{$mentions}.subject_type", $competitorId ? 'competitor' : 'brand')
+            ->when($competitorId, fn (Builder $query) => $query->where("{$mentions}.subject_id", $competitorId))
+            ->whereNotNull("{$mentions}.descriptors")
+            ->select("{$mentions}.id", "{$mentions}.descriptors")
+            ->orderBy("{$mentions}.id")
+            ->chunk(1000, function ($rows) use (&$counts) {
+                foreach ($rows as $row) {
+                    foreach ((array) json_decode((string) $row->descriptors, true) as $descriptor) {
+                        $descriptor = mb_strtolower((string) $descriptor);
+                        $counts[$descriptor] = ($counts[$descriptor] ?? 0) + 1;
+                    }
+                }
+            });
+
+        return $counts;
+    }
+
+    /**
+     * Counts for one period, aggregated in the database.
+     *
+     * @return array{answers: int, engineAnswers: array<string, int>, subjects: array<string, array{answers: int, engines: array<string, int>, mentions: int, position_sum: int, first: int, analysed: int, sentiment: array<string, int>, recommendation: array<string, int>}>, cited: array<string, int>}
      */
     protected function data(ReportFilters $filters): array
     {
@@ -298,51 +376,62 @@ class CompetitorMetrics
 
         $results = Model::prefixedTable('results');
         $mentions = Model::prefixedTable('mentions');
+        $brandKey = 'brand:' . $filters->brand->getKey();
 
-        $resultRows = $this->metrics->results($filters)->toBase()->get(["{$results}.id", 'prompt_id', 'engine', 'brand_cited']);
+        $engineRows = $this->metrics->results($filters)
+            ->toBase()
+            ->selectRaw("{$results}.engine as engine, COUNT(*) as answers, SUM(CASE WHEN {$results}.brand_cited = ? THEN 1 ELSE 0 END) as cited", [true])
+            ->groupBy("{$results}.engine")
+            ->get();
 
         $data = [
-            'answers' => $resultRows->count(),
-            'results' => [],
-            'engineAnswers' => [],
+            'answers' => (int) $engineRows->sum('answers'),
+            'engineAnswers' => $engineRows->mapWithKeys(fn ($row) => [$row->engine => (int) $row->answers])->all(),
             'subjects' => [],
-            'cited' => ['brand:' . $filters->brand->getKey() => $resultRows->where('brand_cited', true)->count()],
+            'cited' => [$brandKey => (int) $engineRows->sum('cited')],
         ];
 
-        foreach ($resultRows as $row) {
-            $data['results'][(int) $row->id] = ['prompt_id' => (int) $row->prompt_id, 'engine' => $row->engine];
-            $data['engineAnswers'][$row->engine] = ($data['engineAnswers'][$row->engine] ?? 0) + 1;
+        $sentiments = array_column(Sentiment::cases(), 'value');
+        $recommendations = array_column(Recommendation::cases(), 'value');
+
+        $query = $this->mentionRows($filters)
+            ->selectRaw("{$mentions}.subject_type as subject_type, {$mentions}.subject_id as subject_id, {$results}.engine as engine")
+            ->selectRaw("COUNT(DISTINCT {$results}.id) as answers, COUNT(*) as mentions, SUM({$mentions}.position) as position_sum")
+            ->selectRaw("SUM(CASE WHEN {$mentions}.position = 1 THEN 1 ELSE 0 END) as firsts")
+            ->selectRaw("SUM(CASE WHEN {$mentions}.sentiment IS NOT NULL AND {$mentions}.sentiment <> '' THEN 1 ELSE 0 END) as analysed")
+            ->groupBy("{$mentions}.subject_type", "{$mentions}.subject_id", "{$results}.engine");
+
+        foreach ($sentiments as $i => $value) {
+            $query->selectRaw("SUM(CASE WHEN {$mentions}.sentiment = ? THEN 1 ELSE 0 END) as s{$i}", [$value]);
         }
 
-        $mentionRows = ResultMention::query()
-            ->whereIn("{$mentions}.result_id", $this->metrics->results($filters)->select("{$results}.id"))
-            ->whereIn('subject_type', ['brand', 'competitor'])
-            ->toBase()
-            ->get(['result_id', 'subject_type', 'subject_id', 'position', 'sentiment', 'recommendation', 'descriptors']);
+        foreach ($recommendations as $i => $value) {
+            $query->selectRaw("SUM(CASE WHEN {$mentions}.recommendation = ? THEN 1 ELSE 0 END) as r{$i}", [$value]);
+        }
 
-        foreach ($mentionRows as $row) {
-            $key = "{$row->subject_type}:{$row->subject_id}";
-            $resultId = (int) $row->result_id;
-            $engine = $data['results'][$resultId]['engine'] ?? null;
+        foreach ($query->get() as $row) {
+            // Brand mentions always belong to the report's brand.
+            $key = $row->subject_type === 'brand' ? $brandKey : "competitor:{$row->subject_id}";
+            $subject = $data['subjects'][$key] ?? ['answers' => 0, 'engines' => [], 'mentions' => 0, 'position_sum' => 0, 'first' => 0, 'analysed' => 0, 'sentiment' => [], 'recommendation' => []];
 
-            $subject = $data['subjects'][$key] ?? ['answers' => [], 'engines' => [], 'positions' => [], 'first' => 0, 'analysed' => 0, 'sentiment' => [], 'recommendation' => [], 'descriptors' => []];
-            $subject['answers'][$resultId] = (int) $row->position;
-            $subject['engines'][$engine][$resultId] = true;
-            $subject['positions'][] = (int) $row->position;
-            $subject['first'] += (int) $row->position === 1 ? 1 : 0;
+            // An answer has one engine, so per-engine counts add up.
+            $subject['answers'] += (int) $row->answers;
+            $subject['engines'][$row->engine] = ($subject['engines'][$row->engine] ?? 0) + (int) $row->answers;
+            $subject['mentions'] += (int) $row->mentions;
+            $subject['position_sum'] += (int) $row->position_sum;
+            $subject['first'] += (int) $row->firsts;
+            $subject['analysed'] += (int) $row->analysed;
 
-            if ($row->sentiment) {
-                $subject['analysed']++;
-                $subject['sentiment'][$row->sentiment] = ($subject['sentiment'][$row->sentiment] ?? 0) + 1;
+            foreach ($sentiments as $i => $value) {
+                if ($count = (int) $row->{"s{$i}"}) {
+                    $subject['sentiment'][$value] = ($subject['sentiment'][$value] ?? 0) + $count;
+                }
             }
 
-            if ($row->recommendation) {
-                $subject['recommendation'][$row->recommendation] = ($subject['recommendation'][$row->recommendation] ?? 0) + 1;
-            }
-
-            foreach ((array) json_decode((string) $row->descriptors, true) as $descriptor) {
-                $descriptor = mb_strtolower((string) $descriptor);
-                $subject['descriptors'][$descriptor] = ($subject['descriptors'][$descriptor] ?? 0) + 1;
+            foreach ($recommendations as $i => $value) {
+                if ($count = (int) $row->{"r{$i}"}) {
+                    $subject['recommendation'][$value] = ($subject['recommendation'][$value] ?? 0) + $count;
+                }
             }
 
             $data['subjects'][$key] = $subject;

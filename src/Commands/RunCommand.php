@@ -7,7 +7,11 @@ use IsrarMinhas\FilamentAiVisibility\Enums\RunTrigger;
 use IsrarMinhas\FilamentAiVisibility\Exceptions\RunNotStarted;
 use IsrarMinhas\FilamentAiVisibility\Models\Brand;
 use IsrarMinhas\FilamentAiVisibility\Runs\RunPlanner;
+use IsrarMinhas\FilamentAiVisibility\Runs\RunSweeper;
+use IsrarMinhas\FilamentAiVisibility\Support\Settings;
+use IsrarMinhas\FilamentAiVisibility\Support\Spend;
 use IsrarMinhas\FilamentAiVisibility\Support\Tenancy;
+use Throwable;
 
 class RunCommand extends Command
 {
@@ -37,17 +41,33 @@ class RunCommand extends Command
             return self::FAILURE;
         }
 
+        $this->sweep();
+
         $started = 0;
 
         // Every tenant's brands; each is handled in its own tenant context.
         Brand::query()->withoutGlobalScopes()->where('is_active', true)->where('run_frequency', '!=', 'manual')
             ->orderBy('id')
             ->each(function (Brand $brand) use ($planner, &$started) {
-                Tenancy::as($brand->tenant_id, function () use ($planner, $brand, &$started) {
-                    if ($planner->isDue($brand)) {
+                // One brand's problem must not stop the others.
+                try {
+                    Tenancy::as($brand->tenant_id, function () use ($planner, $brand, &$started) {
+                        if (! $planner->isDue($brand)) {
+                            return;
+                        }
+
+                        if ($this->budgetCommitted()) {
+                            $this->components->warn("{$brand->name}: the monthly budget is already spent or committed to runs in progress.");
+
+                            return;
+                        }
+
                         $started += (int) $this->start($planner, $brand, RunTrigger::Schedule);
-                    }
-                });
+                    });
+                } catch (Throwable $e) {
+                    report($e);
+                    $this->components->error("{$brand->name}: {$e->getMessage()}");
+                }
             });
 
         $this->components->info("Started {$started} runs.");
@@ -69,5 +89,34 @@ class RunCommand extends Command
                 return false;
             }
         });
+    }
+
+    /**
+     * Whether the tenant's budget is used up once runs in progress are paid for.
+     */
+    protected function budgetCommitted(): bool
+    {
+        if (! app(Settings::class)->get('budget.stop_at_budget', true)) {
+            return false;
+        }
+
+        $remaining = app(Spend::class)->remaining();
+
+        return $remaining !== null && $remaining <= 0;
+    }
+
+    /**
+     * Close runs whose queue jobs were lost before starting new ones.
+     */
+    protected function sweep(): void
+    {
+        try {
+            if ($closed = app(RunSweeper::class)->sweep()) {
+                $this->components->warn('Closed ' . count($closed) . ' stuck runs: #' . implode(', #', $closed) . '.');
+            }
+        } catch (Throwable $e) {
+            report($e);
+            $this->components->error("Could not close stuck runs: {$e->getMessage()}");
+        }
     }
 }

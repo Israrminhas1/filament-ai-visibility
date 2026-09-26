@@ -6,10 +6,10 @@ use Filament\Actions\Action;
 use Filament\Forms\Components\Select;
 use Filament\Notifications\Notification;
 use Filament\Resources\Pages\ListRecords;
-use IsrarMinhas\FilamentAiVisibility\Competitors\CompetitorIntelligence;
 use IsrarMinhas\FilamentAiVisibility\Filament\Concerns\HandlesLimitExceptions;
 use IsrarMinhas\FilamentAiVisibility\Filament\Resources\CandidateResource;
 use IsrarMinhas\FilamentAiVisibility\Filament\Tables\PromptTable;
+use IsrarMinhas\FilamentAiVisibility\Jobs\DiscoverCompetitorsJob;
 use IsrarMinhas\FilamentAiVisibility\Models\Brand;
 
 class ListCandidates extends ListRecords
@@ -41,12 +41,14 @@ class ListCandidates extends ListRecords
             ->modalDescription('Finds names and sites in recent answers, scores them, and classifies the top ones with your AI helper engine. This uses a few AI calls.')
             ->action(function (array $data) use ($brand) {
                 $target = $brand ? $brand() : Brand::query()->findOrFail($data['brand_id']);
-                $report = app(CompetitorIntelligence::class)->run($target);
+
+                // Runs on the queue; one already waiting for this brand covers this request too.
+                DiscoverCompetitorsJob::dispatch($target->getKey(), $target->tenant_id);
 
                 Notification::make()
-                    ->title("{$report['candidates']} candidates found, {$report['classified']} classified")
-                    ->body($report['skipped'])
-                    ->status($report['skipped'] ? 'warning' : 'success')
+                    ->title('Discovery started in the background')
+                    ->body('Results appear in a few minutes.')
+                    ->success()
                     ->send();
             });
     }

@@ -41,7 +41,7 @@ class ReportMail extends Mailable
             return [];
         }
 
-        $html = view('ai-visibility::mail.report', $this->report)->render();
+        $html = view('ai-visibility::mail.report', $this->report + ['forPdf' => true])->render();
 
         return [
             Attachment::fromData(fn () => static::pdf($html), 'ai-visibility-' . str($this->report['brand']->name)->slug() . '-' . $this->report['until']->format('Y-m-d') . '.pdf')
@@ -57,9 +57,13 @@ class ReportMail extends Mailable
         return class_exists(\Dompdf\Dompdf::class);
     }
 
+    /**
+     * DejaVu Sans ships with dompdf and, unlike its built-in fonts, has the
+     * arrows and accented letters reports use.
+     */
     public static function pdf(string $html): string
     {
-        $dompdf = new \Dompdf\Dompdf(['isRemoteEnabled' => false]);
+        $dompdf = new \Dompdf\Dompdf(['isRemoteEnabled' => false, 'defaultFont' => 'DejaVu Sans']);
         $dompdf->loadHtml($html);
         $dompdf->setPaper('A4');
         $dompdf->render();

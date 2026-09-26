@@ -17,9 +17,11 @@ use IsrarMinhas\FilamentAiVisibility\Enums\RunTrigger;
 use IsrarMinhas\FilamentAiVisibility\Events\ResultRecorded;
 use IsrarMinhas\FilamentAiVisibility\Jobs\RunResultJob;
 use IsrarMinhas\FilamentAiVisibility\Models\Batch;
+use IsrarMinhas\FilamentAiVisibility\Models\Brand;
 use IsrarMinhas\FilamentAiVisibility\Models\Result;
 use IsrarMinhas\FilamentAiVisibility\Models\Run;
 use IsrarMinhas\FilamentAiVisibility\Support\Settings;
+use Throwable;
 
 /**
  * Economy mode: scheduled runs go through the providers' batch APIs, which
@@ -66,7 +68,8 @@ class Economy
      */
     public function submit(Run $run, string $engine, array $resultIds): ?Batch
     {
-        $results = $this->pending($resultIds, $engine);
+        // A job run twice must not send the same results in a second paid batch.
+        $results = $this->pending(array_values(array_diff($resultIds, $this->inOpenBatch($run->getKey(), $resultIds))), $engine);
 
         if ($results->isEmpty()) {
             return null;
@@ -111,9 +114,22 @@ class Economy
         /** @var SupportsBatches $driver */
         $driver = $this->registry->get($engine);
 
+        // Recorded before submitting: if anything fails after the provider accepted the
+        // batch, these results are known to be in a batch and are never sent again.
+        $batch = Batch::query()->create([
+            'tenant_id' => $run->tenant_id,
+            'run_id' => $run->getKey(),
+            'engine' => $engine,
+            'status' => Batch::SUBMITTING,
+            'result_ids' => $results->modelKeys(),
+            'submitted_at' => now(),
+        ]);
+
         try {
             $providerId = $driver->submitBatch((string) $this->keys->resolve($engine), $requests);
         } catch (EngineRequestFailed $e) {
+            $batch->delete();
+
             // Rejected by the batch API only: real-time requests decide whether the model really can't be used.
             if ($e->reason === PauseReason::ModelUnavailable) {
                 $this->realtime($results->modelKeys(), $engine, $run->tenant_id);
@@ -130,19 +146,40 @@ class Economy
             }
 
             return null;
+        } catch (Throwable $e) {
+            // Not submitted: forget the batch so the job's failed() answers them in real time.
+            $batch->delete();
+
+            throw $e;
         }
+
+        $batch->forceFill(['provider_batch_id' => $providerId, 'status' => Batch::SUBMITTED])->save();
 
         Result::query()->whereKey($results->modelKeys())->increment('attempts');
 
-        return Batch::query()->create([
-            'tenant_id' => $run->tenant_id,
-            'run_id' => $run->getKey(),
-            'engine' => $engine,
-            'provider_batch_id' => $providerId,
-            'status' => Batch::SUBMITTED,
-            'result_ids' => $results->modelKeys(),
-            'submitted_at' => now(),
-        ]);
+        return $batch;
+    }
+
+    /**
+     * IDs among these results already sent in a batch that is still open.
+     *
+     * @param  array<int>  $resultIds
+     * @return array<int>
+     */
+    public function inOpenBatch(int $runId, array $resultIds): array
+    {
+        $wanted = array_flip(array_map('intval', $resultIds));
+
+        return Batch::query()
+            ->where('run_id', $runId)
+            ->whereIn('status', [Batch::SUBMITTING, Batch::SUBMITTED])
+            ->pluck('result_ids')
+            ->flatten()
+            ->map(fn ($id) => (int) $id)
+            ->filter(fn (int $id) => isset($wanted[$id]))
+            ->unique()
+            ->values()
+            ->all();
     }
 
     /**
@@ -217,14 +254,17 @@ class Economy
     }
 
     /**
+     * Store the batch's answers. Anything left pending (rejected, expired or missing
+     * items) is sent to real time once, by close().
+     *
      * @param  iterable<string, EngineResponse|EngineRequestFailed>  $outcomes
      */
     protected function collect(Batch $batch, iterable $outcomes): int
     {
         $ids = array_flip(array_map('intval', $batch->result_ids ?? []));
-        $retry = [];
         $brands = [];
         $stored = 0;
+        $chunk = [];
 
         foreach ($outcomes as $customId => $outcome) {
             $id = (int) substr((string) $customId, strlen(self::CUSTOM_ID_PREFIX));
@@ -233,20 +273,61 @@ class Economy
                 continue;
             }
 
-            $result = Result::query()->with(['brand', 'prompt'])->find($id);
+            $chunk[$id] = $outcome;
 
-            if (! $result || $result->status !== ResultStatus::Pending || ! $result->brand) {
+            if (count($chunk) >= 100) {
+                $stored += $this->collectChunk($batch, $chunk, $brands);
+                $chunk = [];
+            }
+        }
+
+        if ($chunk !== []) {
+            $stored += $this->collectChunk($batch, $chunk, $brands);
+        }
+
+        foreach ($brands as $brand) {
+            app(BudgetGuard::class)->enforce($brand);
+        }
+
+        return $stored;
+    }
+
+    /**
+     * @param  array<int, EngineResponse|EngineRequestFailed>  $outcomes
+     * @param  array<int|string, Brand>  $brands
+     */
+    protected function collectChunk(Batch $batch, array $outcomes, array &$brands): int
+    {
+        $results = Result::query()->with(['brand', 'prompt'])->whereKey(array_keys($outcomes))->get()->keyBy('id');
+        $stored = 0;
+
+        foreach ($outcomes as $id => $outcome) {
+            $result = $results->get($id);
+
+            if (! $result || $result->status !== ResultStatus::Pending) {
+                continue;
+            }
+
+            if (! $result->brand || ! $result->prompt) {
+                $this->progress->finish($result, ResultStatus::Failed, ['error' => 'The prompt or brand was deleted before the answer arrived.']);
+
                 continue;
             }
 
             if ($outcome instanceof EngineResponse) {
-                if (trim($outcome->answer) === '') {
-                    $retry[] = $id;
-
+                // Empty answers stay pending and are retried in real time.
+                if (trim($outcome->answer) === '' || ! $this->progress->claim($result)) {
                     continue;
                 }
 
-                app(ResultRecorder::class)->record($result, $outcome, 0, batch: true);
+                try {
+                    app(ResultRecorder::class)->record($result, $outcome, 0, batch: true);
+                } catch (Throwable $e) {
+                    $this->progress->release($result);
+
+                    throw $e;
+                }
+
                 $this->engines->recordSuccess($batch->engine);
                 $this->progress->finish($result, ResultStatus::Success);
                 ResultRecorded::dispatch($result->fresh());
@@ -265,19 +346,8 @@ class Economy
                     'skip_reason' => 'engine_paused:' . $outcome->reason->value,
                     'error' => $outcome->getMessage(),
                 ]);
-
-                continue;
             }
-
-            $retry[] = $id;
         }
-
-        foreach ($brands as $brand) {
-            app(BudgetGuard::class)->enforce($brand);
-        }
-
-        // Rejected, expired or missing items: answer them in real time.
-        $this->realtime($retry, $batch->engine, $batch->tenant_id);
 
         return $stored;
     }
@@ -308,11 +378,11 @@ class Economy
             return;
         }
 
-        Result::query()
-            ->whereKey($resultIds)
-            ->where('status', ResultStatus::Pending)
-            ->pluck('id')
-            ->each(fn ($id) => RunResultJob::dispatch((int) $id, $engine, $tenantId));
+        RunResultJob::dispatchPaced(
+            Result::query()->whereKey($resultIds)->where('status', ResultStatus::Pending)->orderBy('id')->pluck('id')->all(),
+            $engine,
+            $tenantId,
+        );
     }
 
     protected function recordPollFailure(string $engine, EngineRequestFailed $e): void
@@ -329,14 +399,24 @@ class Economy
      */
     protected function pending(array $resultIds, string $engine): Collection
     {
-        return Result::query()
+        if ($resultIds === []) {
+            return new Collection;
+        }
+
+        [$usable, $orphaned] = Result::query()
             ->with(['brand', 'prompt'])
             ->whereKey($resultIds)
             ->where('engine', $engine)
             ->where('status', ResultStatus::Pending)
             ->get()
-            ->filter(fn (Result $result) => $result->brand && $result->prompt)
-            ->values();
+            ->partition(fn (Result $result) => $result->brand && $result->prompt);
+
+        // Counted as failed so the run can still finish.
+        foreach ($orphaned as $result) {
+            $this->progress->finish($result, ResultStatus::Failed, ['error' => 'The prompt or brand was deleted before it could be asked.']);
+        }
+
+        return $usable->values();
     }
 
     /**

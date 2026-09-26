@@ -34,14 +34,15 @@ class VisibilityStats extends StatsOverviewWidget
 
         return [
             $this->percent('Visibility', $now['visibility'], $before['visibility'], 'Answers that mention ' . $filters->brand->name),
-            $this->percent('Share of voice', $now['share_of_voice'], $before['share_of_voice'], 'Of answers naming any tracked brand'),
+            $this->percent('Share of voice', $now['share_of_voice'], $before['share_of_voice'], 'Of mentions of you and your active competitors'),
             $this->percent('Cited as a source', $now['citation_rate'], $before['citation_rate'], 'Answers citing your site'),
             Stat::make('Average position', $now['avg_position'] !== null ? '#' . $now['avg_position'] : '—')
                 ->description($this->positionChange($now['avg_position'], $before['avg_position']))
                 ->descriptionIcon($this->positionIcon($now['avg_position'], $before['avg_position']))
                 ->color($this->positionColor($now['avg_position'], $before['avg_position'])),
             Stat::make('Answers', number_format($now['answers']))
-                ->description('$' . number_format($now['spend'], 2) . ' spent')
+                // Spend is not recorded per prompt, so it always covers every topic.
+                ->description('$' . number_format($now['spend'], 2) . ' spent' . ($filters->topicId ? ' (all topics)' : ''))
                 ->descriptionIcon('heroicon-m-banknotes')
                 ->color('gray'),
             ...$this->reachStat($filters),
@@ -80,7 +81,7 @@ class VisibilityStats extends StatsOverviewWidget
         $change = round($now - $before, 1);
 
         return $stat
-            ->description(($change >= 0 ? '+' : '') . $change . ' pts vs previous period')
+            ->description(($change > 0 ? '+' . $change : ($change < 0 ? '−' . abs($change) : '±0')) . ' pts vs previous period')
             ->descriptionIcon($change >= 0 ? 'heroicon-m-arrow-trending-up' : 'heroicon-m-arrow-trending-down')
             ->color($change > 0 ? 'success' : ($change < 0 ? 'danger' : 'gray'));
     }

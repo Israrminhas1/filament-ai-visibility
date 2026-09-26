@@ -7,6 +7,7 @@ use IsrarMinhas\FilamentAiVisibility\Keywords\KeywordSync;
 use IsrarMinhas\FilamentAiVisibility\Keywords\SourceFailed;
 use IsrarMinhas\FilamentAiVisibility\Models\Connection;
 use IsrarMinhas\FilamentAiVisibility\Support\Tenancy;
+use Throwable;
 
 class SyncKeywordsCommand extends Command
 {
@@ -24,17 +25,37 @@ class SyncKeywordsCommand extends Command
             ->when(! $this->option('all'), fn ($query) => $query->where(fn ($q) => $q->whereNull('next_sync_at')->orWhere('next_sync_at', '<=', now())))
             ->get();
 
+        // One failing connection never stops the others.
         foreach ($connections as $connection) {
-            Tenancy::as($connection->tenant_id, function () use ($sync, $connection) {
-                try {
+            try {
+                Tenancy::as($connection->tenant_id, function () use ($sync, $connection) {
                     $counts = $sync->sync($connection);
                     $this->components->info("{$connection->name}: {$counts['created']} new, {$counts['updated']} updated.");
-                } catch (SourceFailed $e) {
-                    $this->components->error("{$connection->name}: {$e->getMessage()}");
-                }
-            });
+                });
+            } catch (SourceFailed $e) {
+                $this->components->error("{$connection->name}: {$e->getMessage()}");
+            } catch (Throwable $e) {
+                $this->markUnexpectedFailure($sync, $connection, $e);
+            }
         }
 
         return self::SUCCESS;
+    }
+
+    /**
+     * Marks the connection errored (retried tomorrow) with a generic message.
+     */
+    protected function markUnexpectedFailure(KeywordSync $sync, Connection $connection, Throwable $e): void
+    {
+        report($e);
+        $failure = KeywordSync::unexpected($e);
+
+        try {
+            $sync->markFailed($connection, $failure);
+        } catch (Throwable $markError) {
+            report($markError);
+        }
+
+        $this->components->error("{$connection->name}: {$failure->getMessage()}");
     }
 }

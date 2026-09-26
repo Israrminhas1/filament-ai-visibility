@@ -2,6 +2,7 @@
 
 use Filament\Actions\Testing\TestAction;
 use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Queue;
 use IsrarMinhas\FilamentAiVisibility\Engines\KeyResolver;
 use IsrarMinhas\FilamentAiVisibility\Enums\CompetitorLabel;
 use IsrarMinhas\FilamentAiVisibility\Filament\Pages\ManageSettings;
@@ -9,6 +10,8 @@ use IsrarMinhas\FilamentAiVisibility\Filament\Pages\Setup;
 use IsrarMinhas\FilamentAiVisibility\Filament\Resources\BrandResource\Pages\EditBrand;
 use IsrarMinhas\FilamentAiVisibility\Filament\Resources\CandidateResource;
 use IsrarMinhas\FilamentAiVisibility\Filament\Resources\CandidateResource\Pages\ListCandidates;
+use IsrarMinhas\FilamentAiVisibility\Jobs\ClassifyCandidatesJob;
+use IsrarMinhas\FilamentAiVisibility\Jobs\DiscoverCompetitorsJob;
 use IsrarMinhas\FilamentAiVisibility\Models\Candidate;
 use IsrarMinhas\FilamentAiVisibility\Support\Instructions;
 use IsrarMinhas\FilamentAiVisibility\Support\Settings;
@@ -76,12 +79,45 @@ it('rejects and ignores in bulk', function () {
     expect(Candidate::query()->pluck('status')->unique()->all())->toBe([Candidate::STATUS_IGNORED]);
 });
 
-it('discovers from the brand page', function () {
-    app(KeyResolver::class)->remove('openai');
+it('discovers from the brand page in the background', function () {
+    Queue::fake();
 
     livewire(EditBrand::class, ['record' => $this->brand->getRouteKey()])
         ->callAction('discover')
-        ->assertNotified();
+        ->assertNotified('Discovery started in the background');
+
+    Queue::assertPushed(DiscoverCompetitorsJob::class, fn ($job) => $job->brandId === $this->brand->id);
+});
+
+it('discovers from the list in the background', function () {
+    Queue::fake();
+
+    livewire(ListCandidates::class)
+        ->callAction('discover', ['brand_id' => $this->brand->id])
+        ->assertNotified('Discovery started in the background');
+
+    Queue::assertPushed(DiscoverCompetitorsJob::class, 1);
+});
+
+it('classifies again in the background', function () {
+    Queue::fake();
+
+    livewire(ListCandidates::class)
+        ->selectTableRecords([$this->globex->id, $this->g2->id])
+        ->callAction(TestAction::make('classifySelected')->table()->bulk())
+        ->assertNotified('Classification started in the background');
+
+    Queue::assertPushed(ClassifyCandidatesJob::class, fn ($job) => $job->brandId === $this->brand->id
+        && collect($job->candidateIds)->sort()->values()->all() === [$this->globex->id, $this->g2->id]);
+});
+
+it('does not track the same candidate twice', function () {
+    $stale = Candidate::query()->find($this->globex->id);
+
+    CandidateResource::accept($this->globex);
+    CandidateResource::accept($stale);
+
+    expect($this->brand->competitors()->count())->toBe(1);
 });
 
 it('suggests competitors in the setup wizard', function () {

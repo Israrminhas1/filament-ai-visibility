@@ -6,6 +6,7 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Support\Arr;
 use IsrarMinhas\FilamentAiVisibility\Enums\PromptStatus;
 use IsrarMinhas\FilamentAiVisibility\Enums\RunFrequency;
+use IsrarMinhas\FilamentAiVisibility\Jobs\RedetectBrandJob;
 use IsrarMinhas\FilamentAiVisibility\Models\Concerns\BelongsToTenant;
 use IsrarMinhas\FilamentAiVisibility\Support\Limits;
 use IsrarMinhas\FilamentAiVisibility\Support\Settings;
@@ -42,6 +43,13 @@ class Brand extends Model
             $brand->domains = static::normalizeDomains($brand->domains ?? []);
             $brand->aliases = static::cleanList($brand->aliases ?? []);
             $brand->exclusions = static::cleanList($brand->exclusions ?? []);
+        });
+
+        // A corrected name or domain should also correct past answers.
+        static::updated(function (Brand $brand) {
+            if ($brand->wasChanged(['name', 'aliases', 'domains', 'exclusions'])) {
+                RedetectBrandJob::dispatchFor($brand);
+            }
         });
     }
 

@@ -7,9 +7,14 @@ use IsrarMinhas\FilamentAiVisibility\Engines\EngineManager;
 use IsrarMinhas\FilamentAiVisibility\Support\Health\CheckResult;
 use IsrarMinhas\FilamentAiVisibility\Support\Health\SystemHealth;
 
+/**
+ * The scheduler and queue are checked once; engines are checked for every
+ * tenant in a multi-tenant install, or for one with --tenant.
+ */
 class HealthCommand extends Command
 {
-    protected $signature = 'ai-visibility:health';
+    protected $signature = 'ai-visibility:health
+        {--tenant= : Only check the engines of this tenant (multi-tenant installs)}';
 
     protected $description = 'Check the scheduler, queue and engines. Exits with 1 when something needs attention.';
 
@@ -33,24 +38,37 @@ class HealthCommand extends Command
             $failed = $failed || $check->status === CheckResult::FAILED;
         }
 
+        $engines->forEachTenant($this->option('tenant'), function (int | string | null $tenant) use ($engines, &$failed) {
+            $failed = ! $this->checkEngines($engines, $tenant !== null ? "[tenant {$tenant}] " : '') || $failed;
+        });
+
+        return $failed ? self::FAILURE : self::SUCCESS;
+    }
+
+    /**
+     * Whether every enabled engine is usable.
+     */
+    protected function checkEngines(EngineManager $engines, string $prefix): bool
+    {
+        $ok = true;
         $enabled = $engines->enabled();
 
         if ($enabled === []) {
-            $this->components->warn('Engines: none enabled yet. Finish setup in the panel.');
+            $this->components->warn("{$prefix}Engines: none enabled yet. Finish setup in the panel.");
         }
 
         foreach ($enabled as $engine) {
-            $label = $engines->registry()->get($engine)->label();
+            $label = $prefix . $engines->registry()->get($engine)->label();
 
             if ($engines->isUsable($engine)) {
                 $this->components->info("{$label}: active");
             } else {
                 $state = $engines->state($engine);
                 $this->components->error("{$label}: paused ({$state->reason?->getLabel()})");
-                $failed = true;
+                $ok = false;
             }
         }
 
-        return $failed ? self::FAILURE : self::SUCCESS;
+        return $ok;
     }
 }

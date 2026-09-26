@@ -9,7 +9,9 @@ use Filament\Forms\Components\Toggle;
 use Filament\Notifications\Notification;
 use Filament\Schemas\Components\Actions;
 use Filament\Schemas\Components\Section;
+use Filament\Schemas\Components\Text;
 use Filament\Schemas\Components\Utilities\Get;
+use Illuminate\Support\Str;
 use IsrarMinhas\FilamentAiVisibility\Engines\Contracts\Engine;
 use IsrarMinhas\FilamentAiVisibility\Engines\EngineManager;
 use IsrarMinhas\FilamentAiVisibility\Engines\EngineRegistry;
@@ -32,26 +34,84 @@ class EngineFields
             ->all();
     }
 
+    /**
+     * Engines grouped by the stored key they use. Engines that share a provider
+     * (both Google engines use one SerpAPI key) are in the same group.
+     *
+     * @return array<string, array<string>> credential => engine keys
+     */
+    public static function credentialGroups(): array
+    {
+        $groups = [];
+
+        foreach (app(EngineRegistry::class)->all() as $key => $engine) {
+            $groups[$engine->credentialKey()][] = $key;
+        }
+
+        return $groups;
+    }
+
+    /**
+     * The engine whose form field holds the key for this engine.
+     */
+    public static function keyOwner(string $engine): string
+    {
+        foreach (static::credentialGroups() as $engines) {
+            if (in_array($engine, $engines, true)) {
+                return $engines[0];
+            }
+        }
+
+        return $engine;
+    }
+
+    /**
+     * Other engines that use the same key as this one.
+     *
+     * @return array<string>
+     */
+    public static function sharedWith(string $engine): array
+    {
+        foreach (static::credentialGroups() as $engines) {
+            if (in_array($engine, $engines, true)) {
+                return array_values(array_diff($engines, [$engine]));
+            }
+        }
+
+        return [];
+    }
+
     protected static function section(Engine $engine): Section
     {
         $key = $engine->key();
+        $owner = static::keyOwner($key);
+        $shared = static::sharedWith($key);
+        $registry = app(EngineRegistry::class);
+        $sharedLabels = collect($shared)->map(fn (string $other) => $registry->get($other)->label())->implode(' and ');
+        $credentialLabel = $engine->credentialKey() === 'serpapi' ? 'SerpAPI' : Str::headline($engine->credentialKey());
 
         return Section::make($engine->label())
             ->description(fn () => static::keyDescription($key))
             ->compact()
             ->collapsible()
+            // Engines that are off or have no key stay out of the way until opened.
+            ->collapsed(fn (Get $get) => ! $get("engines.{$key}.enabled") || ! app(KeyResolver::class)->has($key))
             ->schema([
                 Toggle::make("engines.{$key}.enabled")
                     ->label('Track this engine')
                     ->live(),
 
-                TextInput::make("engines.{$key}.api_key")
-                    ->label('API key')
-                    ->password()
-                    ->revealable()
-                    ->autocomplete('new-password')
-                    ->placeholder(fn () => app(KeyResolver::class)->has($key) ? 'Leave empty to keep the current key' : 'Paste your API key')
-                    ->helperText('Stored encrypted. Never shown again after saving.'),
+                $owner === $key
+                    ? TextInput::make("engines.{$key}.api_key")
+                        ->label($shared === [] ? 'API key' : "{$credentialLabel} key")
+                        ->password()
+                        ->revealable()
+                        ->autocomplete('new-password')
+                        ->placeholder(fn () => app(KeyResolver::class)->has($key) ? 'Leave empty to keep the current key' : 'Paste your API key')
+                        ->helperText($shared === []
+                            ? 'Stored encrypted. Never shown again after saving.'
+                            : "Stored encrypted. Never shown again after saving. {$sharedLabels} uses the same {$credentialLabel} key.")
+                    : Text::make("Uses the {$credentialLabel} key entered under " . $registry->get($owner)->label() . '. One key covers both engines.'),
 
                 Select::make("engines.{$key}.model")
                     ->label('Model for tracked prompts')
@@ -69,8 +129,8 @@ class EngineFields
                         ->label('Test key')
                         ->icon('heroicon-o-bolt')
                         ->color('gray')
-                        ->action(function (Get $get) use ($key, $engine) {
-                            $typed = $get("engines.{$key}.api_key");
+                        ->action(function (Get $get) use ($key, $owner, $engine) {
+                            $typed = $get("engines.{$owner}.api_key");
                             $result = app(EngineManager::class)->test($key, filled($typed) ? $typed : null);
 
                             Notification::make()
@@ -79,7 +139,24 @@ class EngineFields
                                 ->status($result->ok ? 'success' : 'danger')
                                 ->send();
                         }),
-                ]),
+
+                    Action::make("removeKey_{$key}")
+                        ->label('Remove saved key')
+                        ->icon('heroicon-o-trash')
+                        ->color('danger')
+                        ->visible(fn () => $owner === $key && app(KeyResolver::class)->source($key)['source'] === 'panel')
+                        ->requiresConfirmation()
+                        ->modalHeading("Remove the saved {$engine->label()} key?")
+                        ->modalDescription($shared === []
+                            ? 'The engine falls back to a key from AI Monitor or your .env file, if there is one. Otherwise it pauses until a new key is added.'
+                            : "{$sharedLabels} uses the same key and stops working too, unless a key is found in AI Monitor or your .env file.")
+                        ->modalSubmitActionLabel('Remove key')
+                        ->action(function () use ($key, $engine) {
+                            app(KeyResolver::class)->remove($key);
+
+                            Notification::make()->title("{$engine->label()} key removed")->success()->send();
+                        }),
+                ])->key("engineActions_{$key}"),
             ])
             ->columns(1);
     }

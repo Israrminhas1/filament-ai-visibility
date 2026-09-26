@@ -20,7 +20,7 @@
                                 @if ($key === 'weakest')
                                     {{ $row['visibility'] }}%
                                 @else
-                                    {{ $row['change'] > 0 ? '+' : '' }}{{ $row['change'] }} pts
+                                    {{ $row['change'] > 0 ? '▲ +' . $row['change'] : '▼ −' . abs($row['change']) }} pts
                                 @endif
                             </x-filament::badge>
                         </div>

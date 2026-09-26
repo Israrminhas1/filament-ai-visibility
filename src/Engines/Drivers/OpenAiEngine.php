@@ -95,7 +95,7 @@ class OpenAiEngine extends HttpEngine implements SupportsBatches
 
     public function batchStatus(string $apiKey, string $batchId): BatchStatus
     {
-        $batch = $this->send(fn () => $this->http($apiKey)->get("/batches/{$batchId}"));
+        $batch = $this->sendBatchRequest(fn () => $this->http($apiKey)->get("/batches/{$batchId}"));
 
         return match ($batch->json('status')) {
             // An expired batch still returns the answers it finished; the rest are retried.
@@ -110,10 +110,10 @@ class OpenAiEngine extends HttpEngine implements SupportsBatches
 
     public function batchResults(string $apiKey, string $batchId): iterable
     {
-        $batch = $this->send(fn () => $this->http($apiKey)->get("/batches/{$batchId}"));
+        $batch = $this->sendBatchRequest(fn () => $this->http($apiKey)->get("/batches/{$batchId}"));
 
         foreach (array_filter([$batch->json('output_file_id'), $batch->json('error_file_id')]) as $fileId) {
-            $content = $this->send(fn () => $this->http($apiKey)->get("/files/{$fileId}/content"))->body();
+            $content = $this->sendBatchRequest(fn () => $this->http($apiKey)->get("/files/{$fileId}/content"))->body();
 
             foreach (preg_split('/\r?\n/', trim($content)) as $line) {
                 $item = json_decode($line, true);

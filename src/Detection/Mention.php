@@ -9,7 +9,7 @@ final class Mention
         public readonly string $subjectType,
         public readonly ?int $subjectId,
         public readonly string $nameMatched,
-        /** Character offset of the first mention. */
+        /** Byte offset of the first mention, in the answer after Text::clean(). */
         public readonly int $offset,
         public readonly int $count,
         public readonly string $snippet,

@@ -1,5 +1,6 @@
 <?php
 
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Queue;
 use IsrarMinhas\FilamentAiVisibility\Engines\EngineManager;
@@ -12,11 +13,16 @@ use IsrarMinhas\FilamentAiVisibility\Enums\RunStatus;
 use IsrarMinhas\FilamentAiVisibility\Enums\RunTrigger;
 use IsrarMinhas\FilamentAiVisibility\Exceptions\RunNotStarted;
 use IsrarMinhas\FilamentAiVisibility\Jobs\RunResultJob;
+use IsrarMinhas\FilamentAiVisibility\Models\Brand;
 use IsrarMinhas\FilamentAiVisibility\Models\Result;
 use IsrarMinhas\FilamentAiVisibility\Models\Run;
 use IsrarMinhas\FilamentAiVisibility\Models\Usage;
 use IsrarMinhas\FilamentAiVisibility\Runs\RunPlanner;
+use IsrarMinhas\FilamentAiVisibility\Runs\RunProgress;
+use IsrarMinhas\FilamentAiVisibility\Runs\RunSweeper;
+use IsrarMinhas\FilamentAiVisibility\Support\CostEstimator;
 use IsrarMinhas\FilamentAiVisibility\Support\Settings;
+use IsrarMinhas\FilamentAiVisibility\Support\Spend;
 
 function openAiAnswer(string $text = 'Globex is fine, but Acme is best. Source: https://acme.com/crm', int $status = 200, array $error = [])
 {
@@ -304,5 +310,219 @@ describe('commands', function () {
         $this->artisan('ai-visibility:probe')->assertSuccessful();
 
         expect(app(EngineManager::class)->state('openai')->status)->toBe(EngineStatus::Active);
+    });
+});
+
+describe('reliability', function () {
+    it('closes the run when a prompt is deleted mid-run', function () {
+        Http::fake(['api.openai.com/*' => openAiAnswer()]);
+
+        $run = app(RunPlanner::class)->start($this->brand, RunTrigger::Manual);
+        // Deleting a prompt deletes its results (cascade), so their jobs find nothing.
+        $prompt = $this->brand->prompts()->orderByDesc('id')->first();
+        Result::query()->where('prompt_id', $prompt->getKey())->delete();
+        $prompt->delete();
+        work();
+
+        $run->refresh();
+
+        expect($run->status)->toBe(RunStatus::Completed)
+            ->and($run->finished_at)->not->toBeNull()
+            ->and($run->results_total)->toBe(1)
+            ->and($run->results_done)->toBe(1);
+    });
+
+    it('fails answers whose prompt is gone instead of leaving them pending', function () {
+        Http::fake();
+        $run = app(RunPlanner::class)->start($this->brand);
+
+        DB::statement('PRAGMA foreign_keys = OFF');
+        $this->brand->prompts()->delete();
+        DB::statement('PRAGMA foreign_keys = ON');
+
+        work();
+
+        $run->refresh();
+
+        expect($run->status)->toBe(RunStatus::Failed)
+            ->and($run->results_failed)->toBe(2)
+            ->and(Result::query()->pluck('status')->unique()->all())->toBe([ResultStatus::Failed]);
+        Http::assertNothingSent();
+    });
+
+    it('closes runs whose queue jobs were lost', function () {
+        $this->brand->update(['run_frequency' => RunFrequency::Manual]);
+        $run = app(RunPlanner::class)->start($this->brand);
+
+        $this->travel(5)->hours();
+        expect(app(RunSweeper::class)->sweep())->toBe([]);
+
+        // A result retried recently is still making progress.
+        $this->travel(2)->hours();
+        Result::query()->first()->touch();
+        expect(app(RunSweeper::class)->sweep())->toBe([]);
+
+        $this->travel(7)->hours();
+        $this->artisan('ai-visibility:run --due')->assertSuccessful();
+
+        $run->refresh();
+
+        expect($run->finished_at)->not->toBeNull()
+            ->and($run->status)->toBe(RunStatus::Failed)
+            ->and($run->results_failed)->toBe(2)
+            ->and(Result::query()->pluck('error')->unique()->all())->toBe([RunSweeper::LOST_JOB]);
+
+        // A job that turns up late costs nothing.
+        Http::fake();
+        work();
+        Http::assertNothingSent();
+    });
+
+    it('spreads jobs out at the engine rate and gives each its own retry window', function () {
+        app(Settings::class)->set(['engines' => ['requests_per_minute' => 1]]);
+        $this->brand->prompts()->create(['text' => 'CRM with invoicing?']);
+
+        app(RunPlanner::class)->start($this->brand);
+
+        $jobs = Queue::pushed(RunResultJob::class)->values();
+
+        expect($jobs)->toHaveCount(3)
+            ->and($jobs->map(fn ($job) => $job->delay)->all())->toBe([null, 60, 120])
+            ->and($jobs[2]->retryUntil()->getTimestamp())->toBeGreaterThanOrEqual(now()->addSeconds(3600 + 120)->getTimestamp());
+
+        // Never more than a day, however big the run.
+        Queue::fake();
+        RunResultJob::dispatchPaced(range(1, 2000), 'openai', null);
+
+        expect(Queue::pushed(RunResultJob::class)->last()->retryFor)->toBe(86400);
+    });
+
+    it('never asks the engine twice for the same answer', function () {
+        Http::fake(['api.openai.com/*' => openAiAnswer()]);
+        $run = app(RunPlanner::class)->start($this->brand);
+
+        $job = Queue::pushed(RunResultJob::class)->first()->withFakeQueueInteractions();
+        $result = Result::query()->find($job->resultId);
+
+        expect($job->timeout)->toBe(240);
+
+        // Another worker is answering it right now.
+        expect(app(RunProgress::class)->claim($result))->toBeTrue();
+        $job->handle();
+
+        Http::assertNothingSent();
+        expect($result->fresh()->status)->toBe(ResultStatus::Running);
+
+        // A claim abandoned by a crashed worker is taken over.
+        $this->travel(6)->minutes();
+        $job->handle();
+
+        expect($result->fresh()->status)->toBe(ResultStatus::Success);
+
+        // A duplicate of the job does nothing.
+        $job->handle();
+
+        Http::assertSentCount(1);
+        expect($run->refresh()->results_done)->toBe(1);
+    });
+
+    it('counts runs in progress against the budget', function () {
+        app(Settings::class)->set(['budget' => ['monthly_usd' => 1]]);
+        $this->brand->runs()->create([
+            'status' => RunStatus::Running,
+            'results_total' => 10,
+            'results_done' => 5,
+            'estimated_cost_usd' => 1.6,
+            'started_at' => now(),
+        ]);
+
+        $spend = app(Spend::class);
+
+        expect($spend->committed())->toEqualWithDelta(0.8, 0.000001)
+            ->and($spend->remaining())->toEqualWithDelta(0.2, 0.000001)
+            ->and($spend->remaining(includeCommitted: false))->toEqualWithDelta(1.0, 0.000001)
+            ->and($spend->overBudget())->toBeFalse();
+
+        config(['ai-visibility.estimated_cost_per_result.openai' => 0.15]);
+
+        expect(fn () => app(RunPlanner::class)->start($this->brand))->toThrow(RunNotStarted::class, 'after runs in progress');
+    });
+
+    it('stops starting scheduled runs once the budget is committed', function () {
+        config(['ai-visibility.estimated_cost_per_result.openai' => 0.2]);
+        app(Settings::class)->set(['budget' => ['monthly_usd' => 1]]);
+        $this->brand->update(['run_frequency' => RunFrequency::Daily, 'last_run_at' => null]);
+
+        foreach (['Globex', 'Initech'] as $name) {
+            $brand = $this->createBrand(['name' => $name, 'run_frequency' => RunFrequency::Daily]);
+            $brand->prompts()->create(['text' => 'Best CRM?']);
+            $brand->prompts()->create(['text' => 'Cheapest CRM?']);
+        }
+
+        // Each run is estimated at $0.40: a third would take the committed total past $1.
+        $this->artisan('ai-visibility:run --due')->assertSuccessful();
+
+        expect(Run::query()->count())->toBe(2);
+    });
+
+    it('keeps starting other brands when one fails unexpectedly', function () {
+        $this->brand->update(['run_frequency' => RunFrequency::Daily, 'last_run_at' => null]);
+        $other = $this->createBrand(['name' => 'Globex', 'run_frequency' => RunFrequency::Daily]);
+        $other->prompts()->create(['text' => 'Best CRM?']);
+
+        $this->app->instance(RunPlanner::class, new class(app(Settings::class), app(EngineManager::class), app(Spend::class)) extends RunPlanner
+        {
+            public function start(Brand $brand, RunTrigger $trigger = RunTrigger::Manual, ?array $promptIds = null, ?int $userId = null): Run
+            {
+                if ($brand->name === 'Acme') {
+                    throw new RuntimeException('Database hiccup');
+                }
+
+                return parent::start($brand, $trigger, $promptIds, $userId);
+            }
+        });
+
+        $this->artisan('ai-visibility:run --due')
+            ->expectsOutputToContain('Database hiccup')
+            ->assertSuccessful();
+
+        expect(Run::query()->pluck('brand_id')->all())->toBe([$other->getKey()]);
+    });
+
+    it('learns the cost per answer from recent real answers', function () {
+        config(['ai-visibility.estimated_cost_per_result.openai' => 0.03]);
+        $run = $this->brand->runs()->create(['results_total' => 0]);
+        $prompt = $this->brand->prompts()->first();
+
+        $answer = fn (float $cost, string $model) => Result::query()->create([
+            'run_id' => $run->getKey(),
+            'brand_id' => $this->brand->getKey(),
+            'prompt_id' => $prompt->getKey(),
+            'engine' => 'openai',
+            'model' => $model,
+            'status' => ResultStatus::Success,
+            'cost_usd' => $cost,
+        ]);
+
+        foreach (range(1, 4) as $i) {
+            $answer(0.07, 'gpt-a');
+        }
+
+        // Too few answers to trust yet.
+        expect(CostEstimator::perResult('openai'))->toBe(0.03);
+
+        $answer(0.07, 'gpt-a');
+
+        expect(CostEstimator::perResult('openai'))->toEqualWithDelta(0.07, 0.000001)
+            ->and(CostEstimator::costPerRun(2, ['openai']))->toEqualWithDelta(0.14, 0.000001);
+
+        foreach (range(1, 5) as $i) {
+            $answer(0.10, 'gpt-b');
+        }
+
+        expect(CostEstimator::perResult('openai', 'gpt-b'))->toEqualWithDelta(0.10, 0.000001)
+            ->and(CostEstimator::perResult('openai', 'gpt-a'))->toEqualWithDelta(0.07, 0.000001)
+            ->and(CostEstimator::perResult('openai', 'gpt-new'))->toEqualWithDelta(0.085, 0.000001)
+            ->and(CostEstimator::costPerRun(1, ['openai'], 1, ['openai' => 'gpt-b']))->toEqualWithDelta(0.10, 0.000001);
     });
 });

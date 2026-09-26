@@ -31,6 +31,11 @@ class ProbeCommand extends Command
             ->merge(Brand::query()->withoutGlobalScopes()->where('paused_reason', 'budget')->pluck('tenant_id'))
             ->unique();
 
+        // In a multi-tenant install, running as "no tenant" would act on every tenant's rows at once.
+        if (app(EngineManager::class)->tenantIds() !== []) {
+            $tenants = $tenants->reject(fn ($id) => $id === null);
+        }
+
         foreach ($tenants as $tenantId) {
             Tenancy::as($tenantId, fn () => $this->probeTenant());
         }
@@ -64,6 +69,14 @@ class ProbeCommand extends Command
             if ($result->ok) {
                 $engines->resume($engine);
                 $this->components->info("{$engine}: resumed.");
+
+                continue;
+            }
+
+            // The key itself is now the problem: that needs a person, not another probe.
+            if ($result->reason && ! $result->reason->resumesAutomatically()) {
+                $engines->pause($engine, $result->reason, $result->message);
+                $this->components->warn("{$engine}: paused ({$result->reason->getLabel()}).");
 
                 continue;
             }

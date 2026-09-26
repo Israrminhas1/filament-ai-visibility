@@ -17,19 +17,30 @@ class ReportBuilder
     ) {}
 
     /**
+     * A report for the last $days days, up to now.
+     *
      * @param  array<string>  $sections
      * @return array<string, mixed>
      */
     public function build(Brand $brand, int $days, array $sections): array
     {
-        $filters = new ReportFilters($brand, CarbonImmutable::now()->subDays($days - 1)->startOfDay(), CarbonImmutable::now());
+        return $this->buildPeriod($brand, CarbonImmutable::now()->subDays($days - 1)->startOfDay(), CarbonImmutable::now(), $sections, $days);
+    }
+
+    /**
+     * @param  array<string>  $sections
+     * @return array<string, mixed>
+     */
+    public function buildPeriod(Brand $brand, CarbonImmutable $from, CarbonImmutable $until, array $sections, ?int $days = null): array
+    {
+        $filters = new ReportFilters($brand, $from, $until);
         $competitors = app(CompetitorMetrics::class);
 
         $data = [
             'brand' => $brand,
             'from' => $filters->from,
             'until' => $filters->until,
-            'days' => $days,
+            'days' => $days ?? ((int) round($from->diffInDays($until)) ?: 1),
             'sections' => $sections,
         ];
 
@@ -71,10 +82,14 @@ class ReportBuilder
     }
 
     /**
+     * The report a schedule sends now: whole days only, see ReportSchedule::period().
+     *
      * @return array<string, mixed>
      */
     public function forSchedule(ReportSchedule $schedule): array
     {
-        return $this->build($schedule->brand, $schedule->periodDays(), $schedule->enabledSections());
+        [$from, $until] = $schedule->period(now());
+
+        return $this->buildPeriod($schedule->brand, $from, $until, $schedule->enabledSections());
     }
 }

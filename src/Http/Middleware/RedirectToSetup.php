@@ -40,7 +40,8 @@ class RedirectToSetup
             }
         }
 
-        if (app(Settings::class)->isSetupComplete()) {
+        // Someone without permission to run setup would only get a 403 there.
+        if (app(Settings::class)->isSetupComplete() || ! Setup::canAccess()) {
             return $next($request);
         }
 

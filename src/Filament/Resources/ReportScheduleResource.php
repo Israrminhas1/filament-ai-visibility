@@ -61,7 +61,8 @@ class ReportScheduleResource extends Resource
                 Select::make('brand_id')->label('Brand')->options(PromptTable::brandOptions())->required(),
                 TextInput::make('name')->required()->maxLength(255)->default('Weekly AI visibility'),
                 Select::make('frequency')
-                    ->options(['weekly' => 'Weekly (Mondays, last 7 days)', 'monthly' => 'Monthly (1st, last 30 days)'])
+                    ->options(['weekly' => 'Weekly (Mondays, covering the previous 7 days)', 'monthly' => 'Monthly (the 1st, covering the previous month)'])
+                    ->helperText('Changing the frequency moves the next send to the new day.')
                     ->default('weekly')
                     ->required(),
                 Toggle::make('attach_pdf')

@@ -13,6 +13,7 @@ use IsrarMinhas\FilamentAiVisibility\Engines\EngineRequestFailed;
 use IsrarMinhas\FilamentAiVisibility\Engines\EngineResponse;
 use IsrarMinhas\FilamentAiVisibility\Engines\KeyTestResult;
 use IsrarMinhas\FilamentAiVisibility\Enums\PauseReason;
+use Throwable;
 
 /**
  * Google's own AI answers, read through SerpAPI. Both Google engines share
@@ -59,10 +60,12 @@ abstract class SerpApiGoogleEngine implements Engine
             $response = Http::timeout(20)->get('https://serpapi.com/account.json', ['api_key' => $apiKey]);
         } catch (ConnectionException) {
             return KeyTestResult::failed(PauseReason::ProviderOutage, 'could not reach SerpAPI');
+        } catch (Throwable $e) {
+            return KeyTestResult::failed(PauseReason::ProviderOutage, static::redact($e->getMessage(), $apiKey));
         }
 
         if ($response->failed() || $response->json('error')) {
-            return KeyTestResult::failed(static::reason($response) ?? PauseReason::InvalidKey, $response->json('error'));
+            return KeyTestResult::failed(static::reason($response) ?? PauseReason::InvalidKey, static::redact((string) ($response->json('error') ?: 'HTTP ' . $response->status()), $apiKey));
         }
 
         if ((int) ($response->json('total_searches_left') ?? 1) <= 0) {
@@ -86,7 +89,12 @@ abstract class SerpApiGoogleEngine implements Engine
             $response = Http::timeout((int) config('ai-visibility.http.timeout', 60))
                 ->get('https://serpapi.com/search.json', array_filter([...$params, 'api_key' => $apiKey], fn ($v) => $v !== null));
         } catch (ConnectionException $e) {
-            throw EngineRequestFailed::unreachable('Could not reach SerpAPI: ' . $e->getMessage());
+            // The key is a query parameter, so connection errors quote it in the URL.
+            throw EngineRequestFailed::unreachable('Could not reach SerpAPI: ' . static::redact($e->getMessage(), $apiKey));
+        } catch (EngineRequestFailed $e) {
+            throw $e;
+        } catch (Throwable $e) {
+            throw new EngineRequestFailed($this->label() . ': ' . static::redact($e->getMessage(), $apiKey));
         }
 
         $error = (string) $response->json('error');
@@ -96,7 +104,19 @@ abstract class SerpApiGoogleEngine implements Engine
             return $response;
         }
 
-        throw new EngineRequestFailed($this->label() . ': ' . ($error ?: 'HTTP ' . $response->status()), static::reason($response), status: $response->status());
+        throw new EngineRequestFailed(static::redact($this->label() . ': ' . ($error ?: 'HTTP ' . $response->status()), $apiKey), static::reason($response), status: $response->status());
+    }
+
+    /**
+     * Remove the API key from text that is stored or shown.
+     */
+    public static function redact(string $message, string $apiKey): string
+    {
+        if ($apiKey !== '') {
+            $message = str_replace([$apiKey, rawurlencode($apiKey), urlencode($apiKey)], '[redacted]', $message);
+        }
+
+        return preg_replace('/(api_key=)[^&\s"\']+/i', '$1[redacted]', $message) ?? $message;
     }
 
     public static function reason(Response $response): ?PauseReason

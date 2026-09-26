@@ -40,6 +40,8 @@ php artisan queue:work
 * * * * * cd /path-to-your-app && php artisan schedule:run >> /dev/null 2>&1
 ```
 
+A tracking job can take up to 240 seconds (web searches are slow). Set your queue connection's `retry_after` in `config/queue.php` above that, e.g. `300`, or a slow answer may be handed to a second worker.
+
 Then open **AI Visibility** in your panel. The setup wizard walks you through the rest.
 
 ## Setup wizard
@@ -49,7 +51,7 @@ Until setup is finished, every AI Visibility screen opens the wizard, and nothin
 1. **System**: checks the database tables, that the queue isn't `sync`, that a worker is processing jobs, and that the scheduler is running, with the exact fix for anything missing.
 2. **Engines**: turn on engines and paste keys. Each key is tested with a real (cheap) request before it's accepted.
 3. **Budget**: run frequency, samples per prompt, active-prompt limit and monthly budget, with a live cost estimate.
-4. **Brand**: enter the website and fill in the name and description from it.
+4. **Brand**: enter the website and fill in the name and description from it. Legal suffixes are dropped from the name ("Nintendo Co., Ltd." becomes "Nintendo") and the full legal name is kept as another name.
 5. **Competitors**: the ones you already know. More are discovered from AI answers later.
 6. **Keywords** (optional): search keywords used to generate realistic prompts.
 7. **Prompts**: the questions to track.
@@ -84,11 +86,18 @@ For every answer AI Visibility records:
 - every cited source, and whether it's the brand's or a competitor's site
 - tokens, searches and cost
 
-Runs start on each brand's schedule (daily, weekly or manual, at the time set in Settings), or with **Run now** on a brand, which shows the answer count and estimated cost first. The **Runs** and **Answers** screens show progress and every answer, with the brand and competitors highlighted.
+Runs start on each brand's schedule (daily, weekly or manual, at the time set in Settings), or with **Run now** on a brand, which shows the answer count and estimated cost first. The **Runs** and **Answers** screens show progress and every answer.
+
+The **Answers** list shows one result per answer (`#2 · cited`, `Mentioned`, `Not mentioned`, `Failed` or `Skipped`), the competitors named (up to three, then `+N`), sentiment once answers are analysed, and the number of sources. Filter by brand, engine, prompt, date, status, competitor mentioned or sentiment. Opening an answer shows:
+- a summary strip: mentioned, position, cited, sentiment
+- the answer rendered as formatted text, with your brand in bold and competitors underlined (as well as coloured)
+- who was mentioned, ranked: you first, then competitors, then other names, each with the sentence around it and the analysis (sentiment, recommendation, descriptors)
+- the sources, split into those **cited in the answer** and those the engine **also read**, with your site and competitors' sites labelled
+- links to the prompt, the run, and the previous and next answer in the run
 
 ### Economy mode
 
-Turn on **Settings → Engines → Economy mode** to send scheduled runs on OpenAI and Claude through their batch APIs. Tokens cost about half as much; answers arrive within 24 hours instead of minutes. Manual runs are always answered in real time, and other engines are unaffected.
+Turn on **Settings → Engines & API keys → Economy mode** to send scheduled runs on OpenAI and Claude through their batch APIs. Tokens cost about half as much; answers arrive within 24 hours instead of minutes. Manual runs are always answered in real time, and other engines are unaffected.
 
 `ai-visibility:poll-batches` (every 5 minutes) collects finished batches. Nothing is lost if a batch goes wrong: a failed or expired batch, an answer the provider rejected, or a batch still unfinished after 26 hours is answered again in real time. A bad key or empty credit balance pauses the engine exactly as it does for real-time runs. The run page shows how many answers are still waiting.
 
@@ -191,7 +200,7 @@ Every feature works with a single API key. Helper features (analysis, competitor
 
 Keys are found in this order:
 
-1. Saved in the panel (**Settings → Engines**), stored encrypted and never sent back to the browser.
+1. Saved in the panel (**Settings → Engines & API keys**), stored encrypted and never sent back to the browser. **Remove saved key** deletes it (the engine then falls back to the next source below). Both Google engines use one shared SerpAPI key field. The **Health** page links each engine to its key, and **Run setup again** in Settings reopens the wizard.
 2. [AI Monitor](https://github.com/Israrminhas1/filament-aimonitor), if installed.
 3. Environment variables: `AI_VISIBILITY_OPENAI_KEY`, `AI_VISIBILITY_ANTHROPIC_KEY`, `AI_VISIBILITY_GEMINI_KEY`, `AI_VISIBILITY_GROK_KEY`, `AI_VISIBILITY_PERPLEXITY_KEY`, `AI_VISIBILITY_SERPAPI_KEY` (both Google engines).
 
@@ -228,11 +237,34 @@ When `tenant_support` is on (the default), all data, settings, keys and engine s
 2. The `tenant()` helper (e.g. stancl/tenancy).
 3. Filament's current panel tenant.
 
+## Permissions
+
+Everyone who can use the panel can use AI Visibility by default. Two options narrow that down:
+
+```php
+AiVisibilityPlugin::make()
+    // Who can open AI Visibility at all (every screen).
+    ->authorizeUsing(fn ($user) => $user->can('view-ai-visibility'))
+    // Who can change settings, API keys, budgets and alerts, run the setup
+    // wizard, and pause, resume or test engines on the Health page.
+    ->canManageSettings(fn ($user) => $user->is_admin);   // or true / false
+```
+
+Screens a user can't open are hidden from the navigation and return 403. Users who can't manage settings still see the Health page, without its buttons. Both callbacks receive the logged-in user. Resource policies, if you have them, still apply on top.
+
+**Alert recipients**: the "Panel users who receive alerts" picker is searchable and only offers users the current user should see. With Filament tenancy it lists the current tenant's `users()` or `members()`; without such a relationship, only yourself. Without tenancy it starts with yourself, and you search for others. To choose the users yourself:
+
+```php
+AiVisibilityPlugin::make()
+    ->alertRecipientsQuery(fn ($query, $tenant) => $query->where('team_id', $tenant?->getKey()));
+```
+
 ## Plugin options
 
 ```php
 AiVisibilityPlugin::make()
-    ->navigationGroup('Marketing')   // null for no group
+    ->navigationGroups(false)        // one group instead of "AI Visibility", "· Tracking" and "· Admin"
+    ->navigationGroup('Marketing')   // one group with this name (null for no group)
     ->navigationSort(10)
     ->withoutSetupWizard()           // configure everything in code instead
     ->brands()->prompts()->keywords()->settingsPage()->healthPage()  // pass false to hide
@@ -241,13 +273,15 @@ AiVisibilityPlugin::make()
     ->withoutEngine('grok');
 ```
 
+By default the screens are split into three navigation groups: **AI Visibility** (Overview and reports), **AI Visibility · Tracking** (Brands, Prompts, Keywords, Keyword sources, Discovered, Runs, Answers) and **AI Visibility · Admin** (Alerts, Alert rules, Scheduled reports, Settings, Health). `->navigationGroup('Marketing')` puts everything in one group; add `->navigationGroups()` after it to keep the split with that name ("Marketing", "Marketing · Tracking", "Marketing · Admin").
+
 ## Artisan commands
 
 | Command | Purpose |
 |---|---|
 | `ai-visibility:install` | Publish config and migrations, run migrations, print next steps |
-| `ai-visibility:health` | Check the queue, scheduler and engines (non-zero exit when something needs attention) |
-| `ai-visibility:engines {--test} {--resume=openai}` | Show engine states, test keys, or resume an engine |
+| `ai-visibility:health {--tenant=}` | Check the queue, scheduler and engines (non-zero exit when something needs attention); every tenant unless one is given |
+| `ai-visibility:engines {--test} {--resume=openai} {--tenant=}` | Show engine states, test keys, or resume an engine |
 | `ai-visibility:run {--due} {--brand=ID}` | Start due scheduled runs (runs every 15 minutes from the scheduler), or one brand now |
 | `ai-visibility:probe` | Re-test paused engines and resume those that work (runs every 5 minutes) |
 | `ai-visibility:discover {--brand=ID} {--queue}` | Find, score and classify competitors (runs after every run, and daily) |
@@ -255,6 +289,8 @@ AiVisibilityPlugin::make()
 | `ai-visibility:alerts {--watch}` | Check alert rules (daily) or just the queue watchdog (every 10 minutes) |
 | `ai-visibility:send-reports` | Send scheduled reports that are due (hourly) |
 | `ai-visibility:poll-batches` | Store answers from finished economy-mode batches (every 5 minutes) |
+| `ai-visibility:sweep-runs` | Close runs whose remaining answers were lost, e.g. after a queue was flushed (hourly) |
+| `ai-visibility:redetect {--brand=ID}` | Check stored answers again with the current brand and competitor names. Runs by itself when a brand's name, aliases or domains, or its competitors, change |
 
 ## Costs
 

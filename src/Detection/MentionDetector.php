@@ -4,31 +4,66 @@ namespace IsrarMinhas\FilamentAiVisibility\Detection;
 
 use IsrarMinhas\FilamentAiVisibility\Models\Brand;
 use IsrarMinhas\FilamentAiVisibility\Models\Competitor;
+use IsrarMinhas\FilamentAiVisibility\Support\Text;
 
 /**
  * Finds the brand and its competitors in an answer: whole-word,
- * case-insensitive matches of names and aliases, ignoring text inside URLs
- * and inside each subject's exclusion phrases.
+ * case-insensitive matches of names, aliases and their short forms
+ * ("Nintendo" for "Nintendo Co., Ltd."), ignoring links, email addresses,
+ * bare domains and each subject's exclusion phrases. Where names overlap,
+ * the longest match wins, whichever subject it belongs to.
  */
 class MentionDetector
 {
+    /**
+     * Top-level domains treated as a bare domain in text ("notion.so"), besides links.
+     */
+    protected const TLDS = 'com|net|org|io|ai|co|app|dev|so|me|info|biz|xyz|tech|cloud|shop|store|site|online|gg|tv|ly|to|sh|fm|is|it|us|uk|de|fr|es|nl|eu|ca|au|in|jp|cn|br|ru|ch|se|no|dk|fi|pl|be|at|nz|za|kr|mx|ie|sg|hk|tw|il|edu|gov';
+
+    /**
+     * The names to look for, for a brand or competitor. Public so other
+     * features (setup, discovery) match names the same way.
+     *
+     * @return array<string>
+     */
+    public static function terms(Brand|Competitor $subject): array
+    {
+        return Text::matchTerms($subject->names(), $subject->domains ?? []);
+    }
+
     /**
      * @param  iterable<Competitor>  $competitors
      * @return array<Mention> Ordered by position (first named first).
      */
     public function detect(string $answer, Brand $brand, iterable $competitors): array
     {
-        $text = $this->maskUrls($answer);
-        $mentions = [];
+        $text = Text::clean($answer);
 
-        if ($mention = $this->find($text, $answer, 'brand', $brand->getKey(), $brand->names(), $brand->exclusions ?? [])) {
-            $mentions[] = $mention;
-        }
+        $subjects = [['brand', $brand->getKey(), static::terms($brand), $brand->exclusions ?? []]];
 
         foreach ($competitors as $competitor) {
-            if ($mention = $this->find($text, $answer, 'competitor', $competitor->getKey(), $competitor->names(), $competitor->exclusions ?? [])) {
-                $mentions[] = $mention;
-            }
+            $subjects[] = ['competitor', $competitor->getKey(), static::terms($competitor), $competitor->exclusions ?? []];
+        }
+
+        $found = [];
+
+        foreach ($this->spans($text, array_map(fn ($subject) => [$subject[2], $subject[3]], $subjects)) as $span) {
+            $found[$span['subject']][] = $span;
+        }
+
+        $mentions = [];
+
+        foreach ($found as $index => $matches) {
+            [$type, $id] = $subjects[$index];
+
+            $mentions[] = new Mention(
+                subjectType: $type,
+                subjectId: $id,
+                nameMatched: $matches[0]['text'],
+                offset: $matches[0]['start'],
+                count: count($matches),
+                snippet: $this->snippet($text, $matches[0]['start']),
+            );
         }
 
         usort($mentions, fn (Mention $a, Mention $b) => $a->offset <=> $b->offset);
@@ -41,74 +76,120 @@ class MentionDetector
     }
 
     /**
-     * @param  array<string>  $names
-     * @param  array<string>  $exclusions
+     * Non-overlapping matches of several subjects in text already passed
+     * through Text::clean(), in text order. Where matches overlap, the longest
+     * wins, whichever subject it belongs to ("Acme Cloud Pro" over "Acme").
+     *
+     * @param  array<int|string, array{0: array<string>, 1: array<string>}>  $subjects  key => [terms, exclusions]
+     * @return array<int, array{start: int, end: int, text: string, subject: int|string}>
      */
-    protected function find(string $text, string $original, string $type, ?int $id, array $names, array $exclusions): ?Mention
+    public function spans(string $text, array $subjects): array
     {
-        $excluded = $this->excludedRanges($text, $exclusions);
+        $links = $this->linkRanges($text);
+        $candidates = [];
+        $order = 0;
 
-        // Longest names first, so "Acme Cloud" wins over "Acme" at the same spot.
-        usort($names, fn ($a, $b) => mb_strlen($b) <=> mb_strlen($a));
+        foreach ($subjects as $key => [$names, $exclusions]) {
+            foreach ($this->matches($text, $names, $links, $this->excludedRanges($text, $exclusions)) as $match) {
+                $candidates[] = $match + ['subject' => $key, 'order' => $order];
+            }
 
-        $first = null;
-        $firstName = null;
+            $order++;
+        }
+
+        usort($candidates, fn ($a, $b) => [$b['end'] - $b['start'], $a['start'], $a['order']] <=> [$a['end'] - $a['start'], $b['start'], $b['order']]);
+
         $taken = [];
+        $spans = [];
+
+        foreach ($candidates as $candidate) {
+            if ($this->inRanges($candidate['start'], $candidate['end'], $taken)) {
+                continue;
+            }
+
+            $taken[] = [$candidate['start'], $candidate['end']];
+            unset($candidate['order']);
+            $spans[] = $candidate;
+        }
+
+        usort($spans, fn ($a, $b) => $a['start'] <=> $b['start']);
+
+        return $spans;
+    }
+
+    /**
+     * @param  array<string>  $names
+     * @param  array<array{0: int, 1: int}>  $links
+     * @param  array<array{0: int, 1: int}>  $excluded
+     * @return array<int, array{start: int, end: int, text: string}>
+     */
+    protected function matches(string $text, array $names, array $links, array $excluded): array
+    {
+        $matches = [];
 
         foreach ($names as $name) {
             $name = trim($name);
 
-            if ($name === '') {
+            if ($name === '' || ! preg_match_all('/' . Text::namePattern($name) . '/iu', $text, $found, PREG_OFFSET_CAPTURE)) {
                 continue;
             }
 
-            $pattern = '/(?<![\p{L}\p{N}])' . preg_quote($name, '/') . '(?![\p{L}\p{N}])/iu';
+            foreach ($found[0] as [$match, $start]) {
+                $end = $start + strlen($match);
 
-            if (! preg_match_all($pattern, $text, $matches, PREG_OFFSET_CAPTURE)) {
-                continue;
-            }
-
-            foreach ($matches[0] as [$match, $byteOffset]) {
-                $end = $byteOffset + strlen($match);
-
-                if ($this->inRanges($byteOffset, $end, $excluded) || $this->inRanges($byteOffset, $end, $taken)) {
+                if ($this->inRanges($start, $end, $excluded) || $this->inLink($start, $end, $links)) {
                     continue;
                 }
 
-                $taken[] = [$byteOffset, $end];
+                $matches[] = ['start' => $start, 'end' => $end, 'text' => $match];
+            }
+        }
 
-                if ($first === null || $byteOffset < $first) {
-                    $first = $byteOffset;
-                    $firstName = $match;
+        return $matches;
+    }
+
+    /**
+     * Byte ranges of links, email addresses and bare domains ("acme.com/pricing",
+     * "support@acme.io", "notion.so"). Names inside them are not mentions.
+     *
+     * @return array<array{0: int, 1: int}>
+     */
+    protected function linkRanges(string $text): array
+    {
+        $patterns = [
+            '#(?:https?://|www\.)[^\s)\]>"\']+#iu',
+            '/[\p{L}\p{N}._%+-]+@[\p{L}\p{N}-]+(?:\.[\p{L}\p{N}-]+)+/u',
+            '#(?<![\p{L}\p{N}@.-])(?:[\p{L}\p{N}](?:[\p{L}\p{N}-]*[\p{L}\p{N}])?\.)+(?:' . static::TLDS . ')(?![\p{L}\p{N}-])(?:/[^\s)\]>"\']*)?#iu',
+        ];
+
+        $ranges = [];
+
+        foreach ($patterns as $pattern) {
+            if (preg_match_all($pattern, $text, $found, PREG_OFFSET_CAPTURE)) {
+                foreach ($found[0] as [$match, $start]) {
+                    $ranges[] = [$start, $start + strlen(rtrim($match, '.,;:!?'))];
                 }
             }
         }
 
-        if ($first === null) {
-            return null;
-        }
-
-        return new Mention(
-            subjectType: $type,
-            subjectId: $id,
-            nameMatched: $firstName,
-            offset: $first,
-            count: count($taken),
-            snippet: $this->snippet($original, $first),
-        );
+        return $ranges;
     }
 
     /**
-     * Replace URLs with spaces of the same byte length, so offsets stay valid
-     * and names inside URLs ("acme.com/pricing") are not counted as mentions.
+     * Inside a link, unless the match is the whole link: a brand named
+     * "Monday.com" is still found when written on its own.
+     *
+     * @param  array<array{0: int, 1: int}>  $links
      */
-    protected function maskUrls(string $answer): string
+    protected function inLink(int $start, int $end, array $links): bool
     {
-        return (string) preg_replace_callback(
-            '#(?:https?://|www\.)[^\s)\]>"\']+#i',
-            fn (array $match) => str_repeat(' ', strlen($match[0])),
-            $answer,
-        );
+        foreach ($links as [$linkStart, $linkEnd]) {
+            if ($start < $linkEnd && $end > $linkStart && ! ($start === $linkStart && $end === $linkEnd)) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /**
@@ -120,7 +201,7 @@ class MentionDetector
         $ranges = [];
 
         foreach ($exclusions as $phrase) {
-            $phrase = trim($phrase);
+            $phrase = trim(Text::clean((string) $phrase));
 
             if ($phrase === '' || ! preg_match_all('/' . preg_quote($phrase, '/') . '/iu', $text, $matches, PREG_OFFSET_CAPTURE)) {
                 continue;
@@ -159,7 +240,7 @@ class MentionDetector
         $startCandidates = array_filter([strrpos($before, '. '), strrpos($before, "\n"), strrpos($before, '? '), strrpos($before, '! ')], fn ($pos) => $pos !== false);
         $start = $startCandidates ? max($startCandidates) + 1 : 0;
 
-        preg_match('/^.*?(?:[.!?](?=\s|$)|\n|$)/s', $after, $match);
+        preg_match('/^.*?(?:[.!?](?=\s|$)|\n|$)/su', $after, $match);
         $sentence = trim(substr($before, $start) . ($match[0] ?? $after));
         $sentence = trim((string) preg_replace('/\s+/u', ' ', $sentence));
 

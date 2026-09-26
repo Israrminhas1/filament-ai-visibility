@@ -3,6 +3,7 @@
 namespace IsrarMinhas\FilamentAiVisibility\Analysis;
 
 use Illuminate\Support\Collection;
+use IsrarMinhas\FilamentAiVisibility\Detection\MentionDetector;
 use IsrarMinhas\FilamentAiVisibility\Enums\Recommendation;
 use IsrarMinhas\FilamentAiVisibility\Enums\ResultStatus;
 use IsrarMinhas\FilamentAiVisibility\Enums\Sentiment;
@@ -32,35 +33,54 @@ class AnswerAnalyzer
 
     public const OFF = 'off';
 
+    /**
+     * Gave up after repeated unusable replies for this answer.
+     */
+    public const FAILED = 'failed';
+
+    /**
+     * Prefix for answers the helper could not handle yet, followed by the
+     * number of failed attempts ("retry:1").
+     */
+    public const RETRY = 'retry:';
+
     public function __construct(
         protected HelperAi $helper,
         protected Instructions $instructions,
     ) {}
 
     /**
+     * A reply that is not usable JSON only affects its own answers: the batch
+     * is retried one answer at a time, and an answer that keeps failing (or
+     * that the helper keeps leaving out) is marked failed after a few attempts.
+     *
      * @return int Answers analysed.
      *
-     * @throws HelperUnavailable The answers not yet analysed are marked deferred and retried later.
+     * @throws HelperUnavailable No helper can be used right now (no key, budget, outage).
+     *                           The answers not yet analysed are marked deferred and retried later.
      */
     public function analyze(Brand $brand, ?int $runId = null, int $limit = 300): int
     {
         $results = Result::query()
             ->where('brand_id', $brand->getKey())
             ->where('status', ResultStatus::Success)
-            ->whereIn('analysis_status', [self::PENDING, self::DEFERRED])
+            ->where(fn ($query) => $query
+                ->whereIn('analysis_status', [self::PENDING, self::DEFERRED])
+                ->orWhere('analysis_status', 'like', self::RETRY . '%'))
             ->when($runId, fn ($query) => $query->where('run_id', $runId))
             ->with('mentions')
-            ->orderByDesc('id')
+            // New answers first, then the backlog oldest first, so every answer gets its turn.
+            ->orderByRaw('case when analysis_status = ? then 0 else 1 end', [self::PENDING])
+            ->orderBy('id')
             ->limit($limit)
             ->get();
 
         $subjects = $this->subjects($brand);
         $done = 0;
 
-        foreach ($results->chunk((int) config('ai-visibility.discovery.analysis_batch', 5)) as $batch) {
+        foreach ($results->chunk(max(1, (int) config('ai-visibility.discovery.analysis_batch', 5))) as $batch) {
             try {
-                $this->analyzeBatch($brand, $batch, $subjects);
-                $done += $batch->count();
+                $done += $this->analyzeBatch($brand, $batch->values(), $subjects);
             } catch (HelperUnavailable $e) {
                 Result::query()
                     ->whereKey($results->pluck('id'))
@@ -77,25 +97,40 @@ class AnswerAnalyzer
     /**
      * @param  Collection<int, Result>  $batch
      * @param  array<string, array{type: string, id: int}>  $subjects
+     * @return int Answers analysed.
+     *
+     * @throws HelperUnavailable
      */
-    protected function analyzeBatch(Brand $brand, Collection $batch, array $subjects): void
+    protected function analyzeBatch(Brand $brand, Collection $batch, array $subjects): int
     {
         $competitorNames = $brand->competitors()->where('is_active', true)->pluck('name')->implode(', ') ?: 'none';
 
-        $data = $this->helper->json(Usage::PURPOSE_ANALYSIS, $this->instructions->render(Instructions::ANALYSIS, [
+        $data = $this->helper->complete(Usage::PURPOSE_ANALYSIS, $this->instructions->render(Instructions::ANALYSIS, [
             'brand' => $brand->name,
             'competitors' => $competitorNames,
-            'answers' => $batch->map(fn (Result $result) => "ANSWER id={$result->id}\n" . mb_substr((string) $result->answer, 0, 3000))->implode("\n\n"),
-        ]), $brand, maxTokens: 3000);
+            'answers' => $batch->map(fn (Result $result) => "ANSWER id={$result->id}\n" . mb_substr(Text::clean((string) $result->answer), 0, 3000))->implode("\n\n"),
+        ]), $brand, maxTokens: static::maxTokens($batch->count()), json: true)->json();
 
-        $byId = collect($data['answers'] ?? [])->keyBy(fn ($row) => (int) ($row['id'] ?? 0));
+        if (! is_array($data['answers'] ?? null)) {
+            // Unusable reply (often cut off): try each answer on its own once.
+            if ($batch->count() > 1) {
+                return $batch->sum(fn (Result $result) => $this->analyzeBatch($brand, collect([$result]), $subjects));
+            }
+
+            $this->recordFailure($batch->first());
+
+            return 0;
+        }
+
+        $byId = collect($data['answers'])->filter(fn ($row) => is_array($row))->keyBy(fn ($row) => (int) ($row['id'] ?? 0));
+        $done = 0;
 
         foreach ($batch as $result) {
             $row = $byId->get($result->id);
 
             if (! is_array($row)) {
-                // Not in the reply: try again next time rather than dropping it.
-                $result->forceFill(['analysis_status' => self::DEFERRED])->save();
+                // Left out of the reply: try again next time, but not forever.
+                $this->recordFailure($result);
 
                 continue;
             }
@@ -111,7 +146,31 @@ class AnswerAnalyzer
                 'analyzed_at' => now(),
                 'entities_extracted_at' => $result->entities_extracted_at ?? now(),
             ])->save();
+
+            $done++;
         }
+
+        return $done;
+    }
+
+    /**
+     * Room for about 600 tokens of reply per answer.
+     */
+    public static function maxTokens(int $answers): int
+    {
+        return max(2000, min(8000, 600 * $answers));
+    }
+
+    /**
+     * Count a failed attempt; after the configured number the answer is marked failed.
+     */
+    protected function recordFailure(Result $result): void
+    {
+        $status = (string) $result->analysis_status;
+        $attempts = (str_starts_with($status, self::RETRY) ? (int) substr($status, strlen(self::RETRY)) : 0) + 1;
+        $max = max(1, (int) config('ai-visibility.discovery.analysis_attempts', 3));
+
+        $result->forceFill(['analysis_status' => $attempts >= $max ? self::FAILED : self::RETRY . $attempts])->save();
     }
 
     /**
@@ -201,12 +260,12 @@ class AnswerAnalyzer
     {
         $subjects = [];
 
-        foreach ($brand->names() as $name) {
+        foreach (MentionDetector::terms($brand) as $name) {
             $subjects[Text::normalize($name)] = ['type' => 'brand', 'id' => (int) $brand->getKey()];
         }
 
         foreach ($brand->competitors()->get() as $competitor) {
-            foreach ($competitor->names() as $name) {
+            foreach (MentionDetector::terms($competitor) as $name) {
                 $subjects[Text::normalize($name)] ??= ['type' => 'competitor', 'id' => (int) $competitor->getKey()];
             }
         }
@@ -216,7 +275,7 @@ class AnswerAnalyzer
 
     protected function snippet(string $answer, string $name): ?string
     {
-        if (! preg_match('/[^.\n]*(?<![\p{L}\p{N}])' . preg_quote($name, '/') . '(?![\p{L}\p{N}])[^.\n]*[.]?/iu', $answer, $match)) {
+        if (! preg_match('/[^.\n]*' . Text::namePattern(Text::clean($name)) . '[^.\n]*[.]?/iu', Text::clean($answer), $match)) {
             return null;
         }
 

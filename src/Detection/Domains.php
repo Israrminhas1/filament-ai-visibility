@@ -6,7 +6,8 @@ class Domains
 {
     /**
      * Two-part public suffixes, so "shop.acme.co.uk" resolves to "acme.co.uk".
-     * Not the full Public Suffix List, but covers the common country domains.
+     * Not the full Public Suffix List, but covers the common country domains
+     * and the hosting platforms that give each customer a subdomain.
      */
     protected const MULTI_PART_SUFFIXES = [
         'co.uk', 'org.uk', 'gov.uk', 'ac.uk', 'ltd.uk', 'plc.uk', 'me.uk', 'net.uk',
@@ -20,6 +21,11 @@ class Domains
         'com.mx', 'org.mx', 'gob.mx',
         'com.ar', 'com.co', 'com.pe', 'com.tr', 'com.sg', 'com.hk', 'com.tw', 'com.cn', 'com.my', 'com.ph', 'com.pk', 'com.ng', 'com.eg', 'com.sa',
         'co.id', 'co.il', 'co.th', 'co.ke',
+        'com.de', 'co.at', 'or.at', 'com.es', 'com.pl', 'com.ua', 'com.vn', 'com.gr', 'co.ve', 'com.uy', 'com.ec', 'co.cr',
+        // Hosting platforms where each subdomain is a separate site ("acme.github.io").
+        'github.io', 'gitlab.io', 'blogspot.com', 'netlify.app', 'vercel.app', 'pages.dev', 'workers.dev', 'herokuapp.com',
+        'wordpress.com', 'substack.com', 'web.app', 'firebaseapp.com', 'azurewebsites.net', 'myshopify.com', 'wixsite.com',
+        'webflow.io', 'framer.website', 'notion.site', 'glitch.me', 'fly.dev', 'onrender.com', 'readthedocs.io', 'tumblr.com',
     ];
 
     public static function host(string $url): ?string

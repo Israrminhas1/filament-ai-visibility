@@ -18,6 +18,6 @@ final class SourceTestResult
 
     public static function failed(string $message, bool $credentialsRejected = false): self
     {
-        return new self(false, $message, $credentialsRejected);
+        return new self(false, SourceFailed::redact($message), $credentialsRejected);
     }
 }

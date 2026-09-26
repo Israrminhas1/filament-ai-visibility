@@ -4,7 +4,7 @@ namespace IsrarMinhas\FilamentAiVisibility\Support;
 
 use DOMDocument;
 use DOMXPath;
-use Illuminate\Support\Facades\Http;
+use IsrarMinhas\FilamentAiVisibility\Competitors\EvidenceFetcher;
 use Throwable;
 
 /**
@@ -20,20 +20,14 @@ class WebsiteProfile
     {
         $url = str_starts_with($domain, 'http') ? $domain : 'https://' . $domain;
 
+        // The shared fetcher refuses private addresses, checks redirects and caps the size.
         try {
-            $response = Http::timeout(config('ai-visibility.http.website_fetch_timeout', 10))
-                ->withUserAgent(config('ai-visibility.http.user_agent'))
-                ->accept('text/html')
-                ->get($url);
+            $html = app(EvidenceFetcher::class)->fetch($url);
         } catch (Throwable) {
             return null;
         }
 
-        if (! $response->successful() || ! str_contains((string) $response->header('Content-Type'), 'html')) {
-            return null;
-        }
-
-        return $this->parse($response->body());
+        return $html === null ? null : $this->parse($html);
     }
 
     /**

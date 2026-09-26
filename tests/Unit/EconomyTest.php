@@ -1,6 +1,7 @@
 <?php
 
 use Illuminate\Http\Client\Request;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Queue;
 use IsrarMinhas\FilamentAiVisibility\Engines\EngineManager;
@@ -18,6 +19,7 @@ use IsrarMinhas\FilamentAiVisibility\Models\Batch;
 use IsrarMinhas\FilamentAiVisibility\Models\Result;
 use IsrarMinhas\FilamentAiVisibility\Models\Run;
 use IsrarMinhas\FilamentAiVisibility\Runs\RunPlanner;
+use IsrarMinhas\FilamentAiVisibility\Runs\RunSweeper;
 use IsrarMinhas\FilamentAiVisibility\Support\Pricing;
 use IsrarMinhas\FilamentAiVisibility\Support\Settings;
 
@@ -146,6 +148,8 @@ it('runs a full OpenAI batch at the discounted price and retries rejected items 
     // The batch API rejecting the tool says nothing about real time: no pause, just a retry.
     expect(app(EngineManager::class)->state('openai')->status)->not->toBe(EngineStatus::Paused);
     Queue::assertPushed(RunResultJob::class, fn ($job) => $job->resultId === $second->id);
+    // Retried once: collecting and closing the batch must not both queue it.
+    Queue::assertPushed(RunResultJob::class, 1);
 });
 
 it('runs Claude batches and pauses the engine on account errors', function () {
@@ -189,6 +193,7 @@ it('runs Claude batches and pauses the engine on account errors', function () {
         ->and($expired->fresh()->status)->toBe(ResultStatus::Pending);
 
     Queue::assertPushed(RunResultJob::class, fn ($job) => $job->resultId === $expired->id);
+    Queue::assertPushed(RunResultJob::class, 1);
 });
 
 it('pauses and skips when a batch cannot be submitted because of the key', function () {
@@ -281,5 +286,81 @@ it('skips batched answers when everything is paused before submission', function
     }
 
     expect(Result::query()->where('status', ResultStatus::Skipped)->count())->toBe(2);
+    Http::assertNothingSent();
+});
+
+it('never sends a second paid batch for the same answers', function () {
+    Http::fake([
+        'api.openai.com/v1/files' => Http::response(['id' => 'file-in']),
+        'api.openai.com/v1/batches' => Http::response(['id' => 'batch_1']),
+    ]);
+
+    app(RunPlanner::class)->start($this->brand, RunTrigger::Schedule);
+    $job = Queue::pushed(SubmitBatchJob::class)->sole();
+
+    expect($job->tries)->toBe(1);
+
+    // The same job handled twice (e.g. delivered twice by the queue).
+    $job->handle();
+    $job->handle();
+
+    expect(Batch::query()->count())->toBe(1);
+    Http::assertSentCount(2);
+
+    // Should the job still fail, answers the provider already has are not asked again in real time.
+    $job->failed(new RuntimeException('Lost connection to the database'));
+
+    Queue::assertNotPushed(RunResultJob::class);
+});
+
+it('keeps answers of a half-finished submission out of real time until the run is swept', function () {
+    Http::fake([
+        'api.openai.com/v1/files' => Http::response(['id' => 'file-in']),
+        'api.openai.com/v1/batches' => Http::response(['id' => 'batch_1']),
+    ]);
+
+    $run = scheduledRun($this->brand);
+
+    // The provider accepted the batch but its ID was never stored.
+    Batch::query()->update(['status' => Batch::SUBMITTING, 'provider_batch_id' => null]);
+    Queue::pushed(SubmitBatchJob::class)->sole()->failed(new RuntimeException('Deadlock'));
+
+    Queue::assertNotPushed(RunResultJob::class);
+
+    $this->travel(7)->hours();
+
+    expect(app(RunSweeper::class)->sweep())->toBe([$run->getKey()])
+        ->and(Batch::query()->sole()->status)->toBe(Batch::FAILED)
+        ->and($run->fresh()->status)->toBe(RunStatus::Failed);
+});
+
+it('leaves runs waiting on a batch alone until the batch is overdue', function () {
+    Http::fake([
+        'api.openai.com/v1/files' => Http::response(['id' => 'file-in']),
+        'api.openai.com/v1/batches' => Http::response(['id' => 'batch_1']),
+    ]);
+
+    $run = scheduledRun($this->brand);
+
+    $this->travel(20)->hours();
+    expect(app(RunSweeper::class)->sweep())->toBe([]);
+
+    $this->travel(7)->hours();
+    expect(app(RunSweeper::class)->sweep())->toBe([$run->getKey()])
+        ->and($run->fresh()->results_failed)->toBe(2);
+});
+
+it('fails batched answers whose prompt is gone instead of dropping them', function () {
+    Http::fake();
+    $run = app(RunPlanner::class)->start($this->brand, RunTrigger::Schedule);
+
+    DB::statement('PRAGMA foreign_keys = OFF');
+    $this->brand->prompts()->delete();
+    DB::statement('PRAGMA foreign_keys = ON');
+
+    Queue::pushed(SubmitBatchJob::class)->sole()->handle();
+
+    expect($run->fresh()->status)->toBe(RunStatus::Failed)
+        ->and($run->fresh()->results_failed)->toBe(2);
     Http::assertNothingSent();
 });

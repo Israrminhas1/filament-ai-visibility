@@ -106,7 +106,8 @@ class GeneratePromptsAction
                 count: (int) $data['count'],
                 intents: array_map(fn ($i) => $i instanceof PromptIntent ? $i->value : $i, (array) ($data['intents'] ?? [])),
                 persona: $data['persona'] ?? null,
-                topic: filled($data['topic_id'] ?? null) ? Topic::query()->find($data['topic_id']) : null,
+                // Only a topic of this brand, whatever id was submitted.
+                topic: filled($data['topic_id'] ?? null) ? Topic::query()->where('brand_id', $brand->getKey())->find($data['topic_id']) : null,
                 keywordIds: $keywordIds,
                 useKeywords: (bool) ($data['use_keywords'] ?? true),
             );
@@ -137,7 +138,7 @@ class GeneratePromptsAction
             ->label('Organise into topics')
             ->icon('heroicon-o-folder')
             ->color('gray')
-            ->modalDescription('The AI helper proposes topics for this brand\'s prompts. Rename or remove any, then apply.')
+            ->modalDescription('The AI helper proposes topics for this brand\'s prompts (up to ' . number_format(TopicClusterer::MAX_PROMPTS) . ' at a time, those without a topic first). Rename or remove any, then apply.')
             ->mountUsing(function (?Schema $schema) use ($brand) {
                 try {
                     $proposal = app(TopicClusterer::class)->propose($brand());

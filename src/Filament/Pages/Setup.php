@@ -61,6 +61,11 @@ class Setup extends Page
      */
     public ?array $data = [];
 
+    /**
+     * Start from the first step ("Run setup again" in Settings).
+     */
+    public bool $restart = false;
+
     public static function getSlug(?\Filament\Panel $panel = null): string
     {
         return 'ai-visibility/setup';
@@ -74,6 +79,11 @@ class Setup extends Page
     public static function getNavigationIcon(): ?string
     {
         return 'heroicon-o-rocket-launch';
+    }
+
+    public static function requiresSettingsAccess(): bool
+    {
+        return true;
     }
 
     public static function shouldRegisterNavigation(): bool
@@ -98,6 +108,8 @@ class Setup extends Page
 
     public function mount(): void
     {
+        $this->restart = (bool) request()->query('restart');
+
         $settings = app(Settings::class);
         $all = $settings->all();
         $brand = Brand::query()->oldest()->first();
@@ -147,7 +159,8 @@ class Setup extends Page
                     $this->alertsStep(),
                     $this->reviewStep(),
                 ])
-                    ->startOnStep(fn () => min(app(Settings::class)->setupStep(), 9))
+                    ->startOnStep(fn () => $this->restart ? 1 : min(app(Settings::class)->setupStep(), 9))
+                    ->extraAttributes(['class' => 'ai-visibility-setup-wizard'])
                     ->submitAction(new HtmlString(Blade::render('<x-filament::button type="submit" size="sm" icon="heroicon-o-check">Finish setup</x-filament::button>'))),
             ])
             ->statePath('data');
@@ -156,6 +169,8 @@ class Setup extends Page
     public function content(Schema $schema): Schema
     {
         return $schema->components([
+            // Tightens the step bar so nine steps fit at laptop width.
+            View::make('ai-visibility::setup.wizard-style'),
             Form::make([EmbeddedSchema::make('form')])
                 ->id('form')
                 ->livewireSubmitHandler('finish'),
@@ -166,7 +181,7 @@ class Setup extends Page
     {
         return Step::make('System')
             ->icon('heroicon-o-server-stack')
-            ->description('Queue and scheduler')
+            ->description('Queue')
             ->schema([
                 View::make('ai-visibility::setup.system-checks')
                     ->viewData(fn () => ['checks' => app(SystemHealth::class)->checks()]),
@@ -194,7 +209,7 @@ class Setup extends Page
     {
         return Step::make('Engines')
             ->icon('heroicon-o-cpu-chip')
-            ->description('API keys')
+            ->description('Keys')
             ->schema([
                 Text::make('Turn on the AI engines you want to track and add their API keys. One engine is enough to start: every feature works with a single key.'),
                 ...EngineFields::make(),
@@ -240,7 +255,7 @@ class Setup extends Page
     {
         return Step::make('Budget')
             ->icon('heroicon-o-banknotes')
-            ->description('Spend and limits')
+            ->description('Spend')
             ->columns(2)
             ->schema([
                 Select::make('runs.frequency')
@@ -315,7 +330,7 @@ class Setup extends Page
     {
         return Step::make('Brand')
             ->icon('heroicon-o-building-storefront')
-            ->description('What to track')
+            ->description('Website')
             ->columns(2)
             ->schema([
                 TextInput::make('brand.domain')
@@ -394,7 +409,13 @@ class Setup extends Page
         $set('brand.domain', $domain);
 
         if (blank($get('brand.name')) && $profile['name']) {
-            $set('brand.name', $profile['name']);
+            $name = $this->withoutLegalSuffix($profile['name']);
+            $set('brand.name', $name);
+
+            // Keep the full legal name as another name, so it still counts as a mention.
+            if ($name !== $profile['name']) {
+                $set('brand.aliases', array_values(array_unique([...($get('brand.aliases') ?? []), $profile['name']])));
+            }
         }
 
         if (blank($get('brand.description')) && $profile['description']) {
@@ -402,6 +423,24 @@ class Setup extends Page
         }
 
         Notification::make()->title('Details filled in from ' . $domain)->body('Check them before continuing.')->success()->send();
+    }
+
+    /**
+     * "Nintendo Co., Ltd." → "Nintendo", "Acme GmbH" → "Acme". Returns the name
+     * unchanged when nothing would be left.
+     */
+    protected function withoutLegalSuffix(string $name): string
+    {
+        $suffixes = 'co\.?,?\s*ltd|co\.?,?\s*limited|corporation|corp|incorporated|inc|llc|l\.l\.c|ltd|limited|plc|gmbh(?:\s*&\s*co\.?\s*kg)?|ag|kg|sa|s\.a|sas|sarl|s\.r\.l|srl|spa|s\.p\.a|bv|b\.v|nv|n\.v|oy|ab|as|a\/s|aps|pty\.?\s*ltd|pte\.?\s*ltd|kk|k\.k|co|lp|llp';
+        $stripped = $name;
+
+        // Repeat for names like "Acme Holdings Co., Ltd." ending in more than one suffix.
+        do {
+            $previous = $stripped;
+            $stripped = rtrim((string) preg_replace('/[\s,]+(?:' . $suffixes . ')\.?$/iu', '', $stripped), ' ,.');
+        } while ($stripped !== $previous && $stripped !== '');
+
+        return $stripped !== '' ? $stripped : $name;
     }
 
     /**
@@ -440,7 +479,7 @@ class Setup extends Page
     {
         return Step::make('Competitors')
             ->icon('heroicon-o-users')
-            ->description('Who to compare with')
+            ->description('Rivals')
             ->schema([
                 Text::make('Add the competitors you already know. AI Visibility also discovers competitors from AI answers later, so a few is enough.'),
                 Actions::make([
@@ -559,7 +598,7 @@ class Setup extends Page
     {
         return Step::make('Prompts')
             ->icon('heroicon-o-chat-bubble-left-right')
-            ->description('Questions to track')
+            ->description('Questions')
             ->schema([
                 Text::make('Add the questions your customers ask AI assistants, one per row. Don\'t include your brand name.'),
                 Actions::make([
@@ -663,7 +702,7 @@ class Setup extends Page
     {
         return Step::make('Alerts')
             ->icon('heroicon-o-bell-alert')
-            ->description('Where to notify you')
+            ->description('Notify')
             ->schema([
                 Text::make('Alerts tell you when an engine pauses (bad key, no credits, outage), when the budget runs out, or when tracking stops running. These alerts are always sent.'),
                 ...ManageSettings::alertComponents(),

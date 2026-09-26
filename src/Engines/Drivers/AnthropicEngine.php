@@ -113,7 +113,7 @@ class AnthropicEngine extends HttpEngine implements SupportsBatches
 
     public function batchStatus(string $apiKey, string $batchId): BatchStatus
     {
-        $batch = $this->send(fn () => $this->http($apiKey)->get("/messages/batches/{$batchId}"));
+        $batch = $this->sendBatchRequest(fn () => $this->http($apiKey)->get("/messages/batches/{$batchId}"));
 
         return $batch->json('processing_status') === 'ended'
             ? new BatchStatus(BatchStatus::DONE)
@@ -122,7 +122,7 @@ class AnthropicEngine extends HttpEngine implements SupportsBatches
 
     public function batchResults(string $apiKey, string $batchId): iterable
     {
-        $content = $this->send(fn () => $this->http($apiKey)->get("/messages/batches/{$batchId}/results"))->body();
+        $content = $this->sendBatchRequest(fn () => $this->http($apiKey)->get("/messages/batches/{$batchId}/results"))->body();
 
         foreach (preg_split('/\r?\n/', trim($content)) as $line) {
             $item = json_decode($line, true);
@@ -192,25 +192,41 @@ class AnthropicEngine extends HttpEngine implements SupportsBatches
      */
     protected function answerFromBlocks(array $blocks, string $model, int $inputTokens, int $outputTokens, int $searches): EngineResponse
     {
-        $text = [];
+        $text = '';
         $cited = [];
         $results = [];
+        $afterTool = false;
 
         foreach ($blocks as $block) {
             $type = $block['type'] ?? null;
 
             if ($type === 'text') {
-                $text[] = $block['text'] ?? '';
+                $part = (string) ($block['text'] ?? '');
+
+                // Citations split one paragraph into several text blocks, which join
+                // as they are. Text after a search starts a new paragraph, so a
+                // preamble ("I'll look into this.") doesn't run into the answer.
+                if ($afterTool && trim($text) !== '' && trim($part) !== '') {
+                    $text = rtrim($text) . "\n\n" . ltrim($part);
+                } else {
+                    $text .= $part;
+                }
+
+                $afterTool = $afterTool && trim($part) === '';
                 array_push($cited, ...($block['citations'] ?? []));
-            } elseif ($type === 'web_search_tool_result' && array_is_list($block['content'] ?? [])) {
-                // On errors `content` is an error object rather than a list of results.
-                array_push($results, ...$block['content']);
+            } else {
+                $afterTool = true;
+
+                if ($type === 'web_search_tool_result' && array_is_list($block['content'] ?? [])) {
+                    // On errors `content` is an error object rather than a list of results.
+                    array_push($results, ...$block['content']);
+                }
             }
         }
 
         // Sources the answer actually cites come first, then everything the search returned.
         return new EngineResponse(
-            answer: trim(implode('', $text)),
+            answer: trim($text),
             citations: EngineResponse::uniqueCitations([...$cited, ...$results]),
             model: $model,
             inputTokens: $inputTokens,

@@ -8,6 +8,7 @@ use IsrarMinhas\FilamentAiVisibility\Models\Prompt;
 use IsrarMinhas\FilamentAiVisibility\Models\Result;
 use IsrarMinhas\FilamentAiVisibility\Models\Run;
 use IsrarMinhas\FilamentAiVisibility\Models\Usage;
+use IsrarMinhas\FilamentAiVisibility\Reports\CompetitorMetrics;
 use IsrarMinhas\FilamentAiVisibility\Reports\Metrics;
 use IsrarMinhas\FilamentAiVisibility\Reports\PromptHistory;
 use IsrarMinhas\FilamentAiVisibility\Reports\ReportFilters;
@@ -167,4 +168,46 @@ it('defaults report filters to the first brand and 30 days', function () {
     expect($filters->brand->is($this->brand))->toBeTrue()
         ->and($filters->days())->toBe(30)
         ->and($filters->previous()->until->lt($filters->from))->toBeTrue();
+});
+
+it('leaves untracked names and inactive competitors out of share of voice, like the leaderboard', function () {
+    $paused = $this->brand->competitors()->create(['name' => 'Initech', 'is_active' => false]);
+
+    answer($this->p1, 'openai', true, 1, [['brand', $this->brand->id, 1], ['entity', null, 2], ['competitor', $paused->id, 3]]);
+
+    $sov = app(Metrics::class)->shareOfVoice($this->filters);
+    $leaderboard = app(CompetitorMetrics::class)->leaderboard($this->filters);
+
+    expect($sov->pluck('name')->all())->toBe(['Acme', 'Globex'])
+        ->and($sov->firstWhere('type', 'brand')['share'])->toBe(57.1)
+        ->and(app(Metrics::class)->summary($this->filters)['share_of_voice'])->toBe(57.1)
+        ->and($leaderboard->pluck('share_of_voice', 'name')->all())->toBe(['Acme' => 57.1, 'Globex' => 42.9]);
+});
+
+it('reports topics in a few queries with the same numbers as a topic filter', function () {
+    $pricing = $this->brand->topics()->create(['name' => 'Pricing']);
+    $features = $this->brand->topics()->create(['name' => 'Features']);
+    $this->p1->update(['topic_id' => $features->id]);
+    $this->p2->update(['topic_id' => $pricing->id]);
+
+    $metrics = app(Metrics::class);
+
+    \Illuminate\Support\Facades\DB::enableQueryLog();
+    $topics = $metrics->topics($this->filters)->keyBy('name');
+    $queries = count(\Illuminate\Support\Facades\DB::getQueryLog());
+
+    foreach ([$pricing, $features] as $topic) {
+        $scoped = new ReportFilters($this->brand, $this->filters->from, $this->filters->until, topicId: $topic->id);
+        $now = $metrics->summary($scoped);
+        $before = $metrics->summary($scoped->previous());
+
+        expect($topics[$topic->name])->toMatchArray([
+            'answers' => $now['answers'],
+            'visibility' => $now['visibility'],
+            'share_of_voice' => $now['share_of_voice'],
+            'change' => $before['visibility'] === null ? null : round($now['visibility'] - $before['visibility'], 1),
+        ]);
+    }
+
+    expect($queries)->toBeLessThanOrEqual(6);
 });

@@ -3,41 +3,47 @@
 namespace IsrarMinhas\FilamentAiVisibility\Support;
 
 use Illuminate\Support\Str;
+use IsrarMinhas\FilamentAiVisibility\Detection\MentionDetector;
 use IsrarMinhas\FilamentAiVisibility\Models\Result;
 
 /**
- * Renders an answer's markdown safely and highlights the brand and competitors.
+ * Renders an answer's markdown safely and highlights the brand and active
+ * competitors, matching names the same way detection does.
  */
 class AnswerHighlighter
 {
+    protected const BRAND_STYLE = 'background: rgba(16, 185, 129, 0.25); font-weight: 600; border-radius: 0.2rem; padding: 0 0.1rem;';
+
+    protected const COMPETITOR_STYLE = 'background: rgba(239, 68, 68, 0.18); border-radius: 0.2rem; padding: 0 0.1rem;';
+
+    public function __construct(
+        protected MentionDetector $detector,
+    ) {}
+
     public function html(Result $result): string
     {
-        $html = Str::markdown((string) $result->answer, [
+        $html = Str::markdown(Text::clean((string) $result->answer), [
             'html_input' => 'escape',
             'allow_unsafe_links' => false,
         ]);
 
-        $terms = [];
+        $subjects = [];
+        $styles = [];
+        $brand = $result->brand;
 
-        foreach ($result->brand?->names() ?? [] as $name) {
-            $terms[$name] = 'background: rgba(16, 185, 129, 0.25); font-weight: 600; border-radius: 0.2rem; padding: 0 0.1rem;';
-        }
+        if ($brand) {
+            $subjects[] = [MentionDetector::terms($brand), $brand->exclusions ?? []];
+            $styles[] = static::BRAND_STYLE;
 
-        foreach ($result->brand?->competitors ?? [] as $competitor) {
-            foreach ($competitor->names() as $name) {
-                $terms[$name] ??= 'background: rgba(239, 68, 68, 0.18); border-radius: 0.2rem; padding: 0 0.1rem;';
+            foreach ($brand->competitors->where('is_active', true) as $competitor) {
+                $subjects[] = [MentionDetector::terms($competitor), $competitor->exclusions ?? []];
+                $styles[] = static::COMPETITOR_STYLE;
             }
         }
 
-        if ($terms === []) {
+        if ($subjects === []) {
             return $html;
         }
-
-        // Longest first so "Acme Cloud" is highlighted as one phrase.
-        uksort($terms, fn ($a, $b) => mb_strlen($b) <=> mb_strlen($a));
-
-        $pattern = '/(?<![\p{L}\p{N}])(' . implode('|', array_map(fn ($term) => preg_quote(e($term), '/'), array_keys($terms))) . ')(?![\p{L}\p{N}])/iu';
-        $styles = array_change_key_case(array_combine(array_map(fn ($term) => e($term), array_keys($terms)), $terms), CASE_LOWER);
 
         // Only touch text between tags, never tag names or attributes.
         $parts = preg_split('/(<[^>]+>)/', $html, -1, PREG_SPLIT_DELIM_CAPTURE);
@@ -47,11 +53,24 @@ class AnswerHighlighter
                 continue;
             }
 
-            $parts[$index] = preg_replace_callback($pattern, function (array $match) use ($styles) {
-                $style = $styles[mb_strtolower($match[1])] ?? reset($styles);
+            // Match on the plain text, so "McDonald's" is found however it was escaped.
+            $plain = html_entity_decode($part, ENT_QUOTES | ENT_HTML5, 'UTF-8');
+            $spans = $this->detector->spans($plain, $subjects);
 
-                return '<mark style="' . $style . ' color: inherit;">' . $match[1] . '</mark>';
-            }, $part);
+            if ($spans === []) {
+                continue;
+            }
+
+            $out = '';
+            $cursor = 0;
+
+            foreach ($spans as $span) {
+                $out .= e(substr($plain, $cursor, $span['start'] - $cursor))
+                    . '<mark style="' . $styles[$span['subject']] . ' color: inherit;">' . e($span['text']) . '</mark>';
+                $cursor = $span['end'];
+            }
+
+            $parts[$index] = $out . e(substr($plain, $cursor));
         }
 
         return implode('', $parts);

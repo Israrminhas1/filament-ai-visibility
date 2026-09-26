@@ -87,10 +87,21 @@ class GeminiEngine extends HttpEngine
             citations: EngineResponse::uniqueCitations($citations),
             model: $model,
             inputTokens: $response->json('usageMetadata.promptTokenCount'),
-            outputTokens: $response->json('usageMetadata.candidatesTokenCount'),
+            outputTokens: static::outputTokens($response),
             // Gemini 3 bills every search query; older models bill once per grounded prompt.
             searches: str_starts_with($model, 'gemini-2') ? ($queries ? 1 : 0) : count($queries),
         );
+    }
+
+    /**
+     * Thinking tokens are billed as output but reported separately.
+     */
+    protected static function outputTokens(Response $response): ?int
+    {
+        $candidates = $response->json('usageMetadata.candidatesTokenCount');
+        $thoughts = $response->json('usageMetadata.thoughtsTokenCount');
+
+        return $candidates === null && $thoughts === null ? null : (int) $candidates + (int) $thoughts;
     }
 
     protected static function isRedirect(string $url): bool
@@ -121,7 +132,7 @@ class GeminiEngine extends HttpEngine
             text: collect($response->json('candidates.0.content.parts', []))->pluck('text')->filter()->implode(''),
             model: $response->json('modelVersion') ?? $request->model,
             inputTokens: $response->json('usageMetadata.promptTokenCount'),
-            outputTokens: $response->json('usageMetadata.candidatesTokenCount'),
+            outputTokens: static::outputTokens($response),
         );
     }
 }

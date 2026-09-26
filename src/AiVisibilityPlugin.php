@@ -2,6 +2,7 @@
 
 namespace IsrarMinhas\FilamentAiVisibility;
 
+use Closure;
 use Filament\Contracts\Plugin;
 use Filament\Facades\Filament;
 use Filament\Panel;
@@ -36,6 +37,14 @@ class AiVisibilityPlugin implements Plugin
     protected ?string $navigationGroup = 'AI Visibility';
 
     protected int $navigationSort = 0;
+
+    protected bool $navigationGroups = true;
+
+    protected ?Closure $authorizeUsing = null;
+
+    protected Closure | bool $canManageSettings = true;
+
+    protected ?Closure $alertRecipientsQuery = null;
 
     protected bool $setupWizard = true;
 
@@ -115,9 +124,13 @@ class AiVisibilityPlugin implements Plugin
         return 'ai-visibility';
     }
 
+    /**
+     * Put every screen in one navigation group (null for no group).
+     */
     public function navigationGroup(?string $group): static
     {
         $this->navigationGroup = $group;
+        $this->navigationGroups = false;
 
         return $this;
     }
@@ -125,6 +138,108 @@ class AiVisibilityPlugin implements Plugin
     public function getNavigationGroup(): ?string
     {
         return $this->navigationGroup;
+    }
+
+    /**
+     * Split the screens into reports, tracking and admin groups (on by default).
+     */
+    public function navigationGroups(bool $condition = true): static
+    {
+        $this->navigationGroups = $condition;
+
+        return $this;
+    }
+
+    public function hasNavigationGroups(): bool
+    {
+        return $this->navigationGroups && $this->navigationGroup !== null;
+    }
+
+    /**
+     * The navigation group for an area: "reports", "tracking" or "admin".
+     */
+    public function getNavigationGroupFor(string $area): ?string
+    {
+        if (! $this->hasNavigationGroups()) {
+            return $this->navigationGroup;
+        }
+
+        return match ($area) {
+            'tracking' => $this->navigationGroup . ' · Tracking',
+            'admin' => $this->navigationGroup . ' · Admin',
+            default => $this->navigationGroup,
+        };
+    }
+
+    /**
+     * Who can open AI Visibility at all. Receives the current user.
+     */
+    public function authorizeUsing(?Closure $callback): static
+    {
+        $this->authorizeUsing = $callback;
+
+        return $this;
+    }
+
+    /**
+     * Who can change settings, API keys, budgets and engine states, and run setup.
+     */
+    public function canManageSettings(Closure | bool $condition = true): static
+    {
+        $this->canManageSettings = $condition;
+
+        return $this;
+    }
+
+    public function isAuthorized(): bool
+    {
+        return $this->authorizeUsing === null || (bool) ($this->authorizeUsing)(static::user());
+    }
+
+    public function canManage(): bool
+    {
+        if (! $this->isAuthorized()) {
+            return false;
+        }
+
+        return $this->canManageSettings instanceof Closure
+            ? (bool) ($this->canManageSettings)(static::user())
+            : $this->canManageSettings;
+    }
+
+    /**
+     * Whether the current user can manage settings. True when the plugin is not on the current panel.
+     */
+    public static function userCanManage(): bool
+    {
+        return static::current()?->canManage() ?? true;
+    }
+
+    /**
+     * Limit the users offered as alert recipients. Receives the users query and the
+     * current Filament tenant (or null), and returns the query.
+     *
+     * @param  ?Closure(\Illuminate\Database\Eloquent\Builder, ?\Illuminate\Database\Eloquent\Model): mixed  $callback
+     */
+    public function alertRecipientsQuery(?Closure $callback): static
+    {
+        $this->alertRecipientsQuery = $callback;
+
+        return $this;
+    }
+
+    public function getAlertRecipientsQuery(): ?Closure
+    {
+        return $this->alertRecipientsQuery;
+    }
+
+    protected static function user(): mixed
+    {
+        try {
+            return Filament::auth()->user();
+        } catch (Throwable) {
+            return auth()->user();
+        }
     }
 
     public function navigationSort(int $sort): static

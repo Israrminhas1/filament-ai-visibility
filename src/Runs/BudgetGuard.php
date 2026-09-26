@@ -46,6 +46,14 @@ class BudgetGuard
 
         if ($tenantBudget !== null && $this->spend->thisMonth() >= $tenantBudget) {
             foreach ($this->engines->enabled() as $engine) {
+                $state = $this->engines->state($engine);
+
+                // A pause for another reason (bad key, manual…) is kept, so it is
+                // neither reported again nor lifted when the budget frees up.
+                if ($state->status === EngineStatus::Paused && $state->reason !== PauseReason::Budget) {
+                    continue;
+                }
+
                 $this->engines->pause($engine, PauseReason::Budget, sprintf('The monthly budget of $%s is used up.', number_format($tenantBudget, 2)));
             }
         }

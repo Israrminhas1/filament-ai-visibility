@@ -5,6 +5,7 @@ namespace IsrarMinhas\FilamentAiVisibility\Filament\Pages;
 use Filament\Actions\Action;
 use Filament\Notifications\Notification;
 use Filament\Pages\Page;
+use IsrarMinhas\FilamentAiVisibility\AiVisibilityPlugin;
 use IsrarMinhas\FilamentAiVisibility\Engines\EngineManager;
 use IsrarMinhas\FilamentAiVisibility\Engines\KeyResolver;
 use IsrarMinhas\FilamentAiVisibility\Enums\EngineStatus;
@@ -84,7 +85,11 @@ class Health extends Page
         $keys = app(KeyResolver::class);
         $enabled = $engines->enabled();
 
+        $canManage = AiVisibilityPlugin::userCanManage();
+
         return [
+            'canManage' => $canManage,
+            'settingsUrl' => $canManage ? ManageSettings::enginesUrl() : null,
             'checks' => app(SystemHealth::class)->checks(),
             'killSwitch' => app(Settings::class)->killSwitch(),
             'engines' => collect($engines->registry()->all())->map(function ($engine, $key) use ($engines, $keys, $enabled) {
@@ -110,6 +115,8 @@ class Health extends Page
 
     public function testAndResume(string $engine): void
     {
+        abort_unless(AiVisibilityPlugin::userCanManage(), 403);
+
         $result = app(EngineManager::class)->testAndResume($engine);
 
         Notification::make()
@@ -121,6 +128,8 @@ class Health extends Page
 
     public function pauseEngine(string $engine): void
     {
+        abort_unless(AiVisibilityPlugin::userCanManage(), 403);
+
         app(EngineManager::class)->pause($engine, PauseReason::Manual);
 
         Notification::make()->title('Engine paused')->success()->send();

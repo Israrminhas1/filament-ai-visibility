@@ -1,6 +1,8 @@
 <x-filament-widgets::widget>
     <x-filament::section icon="heroicon-o-trophy" heading="Leaderboard">
-        <x-slot name="description">Your brand and competitors across all answers in the period. Change is in points vs the previous period.</x-slot>
+        <x-slot name="description">Your brand and active competitors across all answers in the period. Change is in points vs the previous period.</x-slot>
+
+        @include('ai-visibility::widgets.partials.styles')
 
         @if ($rows->isEmpty())
             <div style="opacity: 0.75;">No answers in this period.</div>
@@ -27,15 +29,13 @@
                                 </td>
                                 <td style="padding: 0.5rem; text-align: right; white-space: nowrap;">
                                     {{ $row['visibility'] }}%
-                                    @if ($row['change'] !== null && $row['change'] != 0)
-                                        <span style="font-size: 0.8rem; color: {{ $row['change'] > 0 ? '#059669' : '#dc2626' }};">{{ $row['change'] > 0 ? '▲' : '▼' }}{{ abs($row['change']) }}</span>
-                                    @endif
+                                    @include('ai-visibility::widgets.partials.change', ['change' => $row['change']])
                                 </td>
                                 <td style="padding: 0.5rem; text-align: right;">{{ $row['share_of_voice'] }}%</td>
                                 <td style="padding: 0.5rem; text-align: right;">{{ $row['avg_position'] !== null ? '#' . $row['avg_position'] : '—' }}</td>
                                 <td style="padding: 0.5rem; text-align: right;">{{ $row['win_rate'] !== null ? $row['win_rate'] . '%' : '—' }}</td>
                                 <td style="padding: 0.5rem; text-align: right;">{{ $row['citation_rate'] }}%</td>
-                                <td style="padding: 0.5rem; text-align: right; color: {{ ($row['net_sentiment'] ?? 0) > 0 ? '#059669' : (($row['net_sentiment'] ?? 0) < 0 ? '#dc2626' : 'inherit') }};">{{ $row['net_sentiment'] !== null ? ($row['net_sentiment'] > 0 ? '+' : '') . $row['net_sentiment'] : '—' }}</td>
+                                <td @class(['aiv-up' => ($row['net_sentiment'] ?? 0) > 0, 'aiv-down' => ($row['net_sentiment'] ?? 0) < 0]) style="padding: 0.5rem; text-align: right;">{{ $row['net_sentiment'] === null ? '—' : ($row['net_sentiment'] > 0 ? '+' . $row['net_sentiment'] : ($row['net_sentiment'] < 0 ? '−' . abs($row['net_sentiment']) : '0')) }}</td>
                                 <td style="padding: 0.5rem; text-align: right;">{{ $row['top_pick_rate'] !== null ? $row['top_pick_rate'] . '%' : '—' }}</td>
                             </tr>
                         @endforeach

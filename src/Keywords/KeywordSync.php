@@ -12,6 +12,7 @@ use IsrarMinhas\FilamentAiVisibility\Support\Alerts\AlertNotifier;
 use IsrarMinhas\FilamentAiVisibility\Support\Limits;
 use IsrarMinhas\FilamentAiVisibility\Support\Settings;
 use IsrarMinhas\FilamentAiVisibility\Support\Text;
+use Throwable;
 
 /**
  * Pulls keywords from a connection into the brand's keyword list. New
@@ -87,6 +88,13 @@ class KeywordSync
             $this->markFailed($connection, $e);
 
             throw $e;
+        } catch (Throwable $e) {
+            // Anything unexpected: log the details, store only a generic message.
+            report($e);
+            $failure = static::unexpected($e);
+            $this->markFailed($connection, $failure);
+
+            throw $failure;
         }
 
         $connection->forceFill([
@@ -98,6 +106,14 @@ class KeywordSync
         ])->save();
 
         return $counts;
+    }
+
+    /**
+     * A safe, generic failure for an unexpected error (the original is kept as the previous exception).
+     */
+    public static function unexpected(Throwable $e): SourceFailed
+    {
+        return new SourceFailed('The sync failed unexpectedly. Details are in the application log.', previous: $e);
     }
 
     public function markFailed(Connection $connection, SourceFailed $e): void

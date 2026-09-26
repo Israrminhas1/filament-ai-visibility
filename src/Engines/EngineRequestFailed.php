@@ -30,9 +30,23 @@ class EngineRequestFailed extends RuntimeException
         return new self(
             $message,
             HttpEngine::classifyFailure($response),
-            is_numeric($retryAfter) ? (int) $retryAfter : null,
+            is_numeric($retryAfter) ? (int) $retryAfter : self::googleRetryDelay($response),
             $response->status(),
         );
+    }
+
+    /**
+     * Google sends the wait in the error details ("retryDelay": "36s") rather than a header.
+     */
+    protected static function googleRetryDelay(Response $response): ?int
+    {
+        foreach ((array) $response->json('error.details', []) as $detail) {
+            if (is_array($detail) && preg_match('/^(\d+(?:\.\d+)?)s$/', (string) ($detail['retryDelay'] ?? ''), $match)) {
+                return (int) ceil((float) $match[1]);
+            }
+        }
+
+        return null;
     }
 
     /**

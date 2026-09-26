@@ -12,6 +12,9 @@ class Batch extends Model
 {
     use BelongsToTenant;
 
+    // Being sent to the provider; the results must not be sent again.
+    public const SUBMITTING = 'submitting';
+
     public const SUBMITTED = 'submitted';
 
     public const COMPLETED = 'completed';

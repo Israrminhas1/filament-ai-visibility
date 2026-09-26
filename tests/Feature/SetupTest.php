@@ -128,3 +128,11 @@ it('resumes where the user left off', function () {
 
     livewire(Setup::class)->assertWizardCurrentStep(4);
 });
+
+it('starts from the first step when run again from Settings', function () {
+    app(Settings::class)->setSetupStep(9);
+    $this->completeSetup();
+
+    livewire(Setup::class)->assertWizardCurrentStep(9);
+    \Livewire\Livewire::withQueryParams(['restart' => 1])->test(Setup::class)->assertWizardCurrentStep(1);
+});

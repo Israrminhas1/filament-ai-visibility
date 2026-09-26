@@ -3,6 +3,7 @@
 namespace IsrarMinhas\FilamentAiVisibility\Support;
 
 use IsrarMinhas\FilamentAiVisibility\Models\Brand;
+use IsrarMinhas\FilamentAiVisibility\Models\Run;
 use IsrarMinhas\FilamentAiVisibility\Models\Usage;
 
 /**
@@ -64,26 +65,47 @@ class Spend
     }
 
     /**
-     * Remaining budget for the brand this month (the smaller of the tenant and brand budgets), or null for no budget.
+     * Estimated cost of answers still to come in unfinished runs: each run's estimate
+     * pro-rated by its unanswered results (answers in open batches are among them).
      */
-    public function remaining(?Brand $brand = null): ?float
+    public function committed(?Brand $brand = null): float
+    {
+        return (float) Run::query()
+            ->whereNull('finished_at')
+            ->where('results_total', '>', 0)
+            ->whereNotNull('estimated_cost_usd')
+            ->when($brand, fn ($query) => $query->where('brand_id', $brand->getKey()))
+            ->get(['id', 'estimated_cost_usd', 'results_total', 'results_done', 'results_failed', 'results_skipped'])
+            ->sum(fn (Run $run) => (float) $run->estimated_cost_usd * max(0, $run->results_total - $run->processed()) / $run->results_total);
+    }
+
+    /**
+     * Budget left for the brand this month (the smaller of the tenant and brand budgets), or null
+     * for no budget. By default the expected cost of runs still in progress is already taken off,
+     * so new runs cannot overshoot the budget; pass false for what has actually been spent.
+     */
+    public function remaining(?Brand $brand = null, bool $includeCommitted = true): ?float
     {
         $remaining = [];
 
         if (($budget = $this->monthlyBudget()) !== null) {
-            $remaining[] = $budget - $this->thisMonth();
+            $remaining[] = $budget - $this->thisMonth() - ($includeCommitted ? $this->committed() : 0.0);
         }
 
         if ($brand && ($budget = $this->brandBudget($brand)) !== null) {
-            $remaining[] = $budget - $this->thisMonth($brand);
+            $remaining[] = $budget - $this->thisMonth($brand) - ($includeCommitted ? $this->committed($brand) : 0.0);
         }
 
         return $remaining ? max(0.0, min($remaining)) : null;
     }
 
+    /**
+     * Whether actual spending has used up the budget. Runs in progress are not counted
+     * here, or a run's own estimate would stop its own answers.
+     */
     public function overBudget(?Brand $brand = null): bool
     {
-        $remaining = $this->remaining($brand);
+        $remaining = $this->remaining($brand, includeCommitted: false);
 
         return $remaining !== null && $remaining <= 0;
     }

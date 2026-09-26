@@ -3,12 +3,15 @@
 namespace IsrarMinhas\FilamentAiVisibility\Competitors;
 
 use Illuminate\Support\Collection;
+use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\Log;
 use IsrarMinhas\FilamentAiVisibility\Engines\EngineManager;
 use IsrarMinhas\FilamentAiVisibility\Enums\CompetitorLabel;
 use IsrarMinhas\FilamentAiVisibility\Events\CandidateClassified;
 use IsrarMinhas\FilamentAiVisibility\Models\Brand;
 use IsrarMinhas\FilamentAiVisibility\Models\Candidate;
 use IsrarMinhas\FilamentAiVisibility\Models\Classification;
+use IsrarMinhas\FilamentAiVisibility\Models\Model;
 use IsrarMinhas\FilamentAiVisibility\Models\ResultMention;
 use IsrarMinhas\FilamentAiVisibility\Models\Usage;
 use IsrarMinhas\FilamentAiVisibility\Support\HelperAi;
@@ -22,6 +25,11 @@ use IsrarMinhas\FilamentAiVisibility\Support\Settings;
  */
 class Classifier
 {
+    /**
+     * Candidates the AI could not label are tried this many times in total.
+     */
+    public const MAX_ATTEMPTS = 3;
+
     public function __construct(
         protected HelperAi $helper,
         protected Instructions $instructions,
@@ -56,16 +64,49 @@ class Classifier
     public function due(Brand $brand): Collection
     {
         $staleBefore = now()->subDays((int) $this->settings->get('discovery.reclassify_days', 90));
+        // A failed attempt leaves the candidate "new" with classified_at set; wait before trying again.
+        $retryBefore = now()->subDays((int) config('ai-visibility.discovery.retry_failed_days', 7));
+        $topN = (int) $this->settings->get('discovery.top_n', 25);
 
         return Candidate::query()
             ->where('brand_id', $brand->getKey())
             ->where('score', '>', 0)
             ->where(fn ($query) => $query
-                ->where('status', Candidate::STATUS_NEW)
+                ->where(fn ($q) => $q->where('status', Candidate::STATUS_NEW)->where(fn ($q) => $q->whereNull('classified_at')->orWhere('classified_at', '<', $retryBefore)))
                 ->orWhere(fn ($q) => $q->where('status', Candidate::STATUS_CLASSIFIED)->where('classified_at', '<', $staleBefore)))
             ->orderByDesc('score')
-            ->limit((int) $this->settings->get('discovery.top_n', 25))
-            ->get();
+            ->limit($topN * 2)
+            ->get()
+            ->reject(fn (Candidate $candidate) => $candidate->status === Candidate::STATUS_NEW && $this->attempts($candidate) >= self::MAX_ATTEMPTS)
+            ->take($topN)
+            ->values();
+    }
+
+    /**
+     * Failed classification attempts for a candidate that has no label yet.
+     */
+    public function attempts(Candidate $candidate): int
+    {
+        return (int) Cache::get($this->attemptsKey($candidate), 0);
+    }
+
+    /**
+     * Remember a failed attempt, so the candidate is not paid for on every run.
+     */
+    protected function failed(Candidate $candidate, string $reason): void
+    {
+        Cache::put($this->attemptsKey($candidate), $this->attempts($candidate) + 1, now()->addDays(180));
+
+        if ($candidate->status === Candidate::STATUS_NEW) {
+            $candidate->forceFill(['classified_at' => now()])->save();
+        }
+
+        Log::info("AI Visibility: could not classify candidate {$candidate->getKey()} ({$candidate->name}): {$reason}");
+    }
+
+    protected function attemptsKey(Candidate $candidate): string
+    {
+        return 'ai-visibility:classify-attempts:' . $candidate->getKey();
     }
 
     /**
@@ -75,7 +116,7 @@ class Classifier
     {
         $evidence = $batch->mapWithKeys(fn (Candidate $candidate) => [$candidate->getKey() => $this->evidenceFor($candidate)]);
 
-        $data = $this->helper->json(Usage::PURPOSE_CLASSIFICATION, $this->instructions->render(Instructions::CLASSIFICATION, [
+        $data = $this->helper->complete(Usage::PURPOSE_CLASSIFICATION, $this->instructions->render(Instructions::CLASSIFICATION, [
             'brand' => $brand->name,
             'domain' => $brand->primaryDomain() ?? 'unknown',
             'description' => $brand->description ?: 'not given',
@@ -85,20 +126,32 @@ class Classifier
             'labels' => collect(CompetitorLabel::cases())->map(fn ($label) => "- {$label->value}: {$label->getDescription()}")->implode("\n"),
             'examples' => $this->examples($brand),
             'candidates' => $batch->map(fn (Candidate $candidate) => $this->describe($candidate, $evidence[$candidate->getKey()]))->implode("\n\n"),
-        ]), $brand, maxTokens: 3000);
+        ]), $brand, maxTokens: 3000, json: true)->json();
+
+        // One bad reply only loses this batch.
+        if (! is_array($data)) {
+            $batch->each(fn (Candidate $candidate) => $this->failed($candidate, 'the AI helper did not return valid JSON'));
+
+            return 0;
+        }
 
         $helper = app(EngineManager::class)->helper();
-        $results = collect($data['results'] ?? [])->keyBy(fn ($row) => (string) ($row['key'] ?? ''));
+        $results = collect(is_array($data['results'] ?? null) ? $data['results'] : [])
+            ->filter(fn ($row) => is_array($row) && static::candidateId($row['key'] ?? null) !== null)
+            ->keyBy(fn ($row) => static::candidateId($row['key']));
         $count = 0;
 
         foreach ($batch as $candidate) {
-            $row = $results->get('c' . $candidate->getKey());
+            $row = $results->get($candidate->getKey());
+            $label = $row ? CompetitorLabel::tryFrom((string) ($row['label'] ?? '')) : null;
 
-            if (! $row) {
+            // Missing from the reply, or a label we do not know: leave it unclassified.
+            if (! $label) {
+                $this->failed($candidate, $row ? 'unknown label "' . ($row['label'] ?? '') . '"' : 'missing from the reply');
+
                 continue;
             }
 
-            $label = CompetitorLabel::tryFrom((string) ($row['label'] ?? '')) ?? CompetitorLabel::Unrelated;
             $confidence = in_array($row['confidence'] ?? null, ['high', 'medium', 'low'], true) ? $row['confidence'] : 'low';
 
             $candidate->classifications()->create([
@@ -120,6 +173,8 @@ class Classifier
                 'classified_at' => now(),
             ])->save();
 
+            Cache::forget($this->attemptsKey($candidate));
+
             $this->actions->applySourceCategory($candidate);
 
             CandidateClassified::dispatch($candidate);
@@ -132,6 +187,18 @@ class Classifier
         }
 
         return $count;
+    }
+
+    /**
+     * The candidate ID in a reply key: "c12", or "12" when the AI dropped the prefix.
+     */
+    public static function candidateId(mixed $key): ?int
+    {
+        if (is_int($key)) {
+            return $key;
+        }
+
+        return is_string($key) && preg_match('/^\s*c?\s*[-#:]?\s*(\d+)\s*$/i', $key, $match) ? (int) $match[1] : null;
     }
 
     /**
@@ -154,7 +221,9 @@ class Classifier
         }
 
         // The sentences the AI answers used to describe it.
+        // Only this brand's answers: other tenants' answers must never leak into the prompt.
         $evidence['mentions'] = ResultMention::query()
+            ->whereIn('result_id', $candidate->brand->results()->select(Model::prefixedTable('results') . '.id'))
             ->where('subject_type', 'entity')
             ->whereRaw('LOWER(name_matched) = ?', [mb_strtolower($candidate->name)])
             ->whereNotNull('snippet')

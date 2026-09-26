@@ -3,6 +3,7 @@
 namespace IsrarMinhas\FilamentAiVisibility\Alerts;
 
 use Carbon\CarbonImmutable;
+use Carbon\CarbonInterface;
 use IsrarMinhas\FilamentAiVisibility\AiVisibilityPlugin;
 use IsrarMinhas\FilamentAiVisibility\Enums\CompetitorLabel;
 use IsrarMinhas\FilamentAiVisibility\Enums\ResultStatus;
@@ -11,6 +12,7 @@ use IsrarMinhas\FilamentAiVisibility\Filament\Pages\CompetitorsReport;
 use IsrarMinhas\FilamentAiVisibility\Filament\Pages\Overview;
 use IsrarMinhas\FilamentAiVisibility\Filament\Resources\CandidateResource;
 use IsrarMinhas\FilamentAiVisibility\Filament\Resources\RunResource;
+use IsrarMinhas\FilamentAiVisibility\Models\AlertEvent;
 use IsrarMinhas\FilamentAiVisibility\Models\AlertRule;
 use IsrarMinhas\FilamentAiVisibility\Models\Brand;
 use IsrarMinhas\FilamentAiVisibility\Models\Candidate;
@@ -26,10 +28,16 @@ use IsrarMinhas\FilamentAiVisibility\Support\Spend;
 /**
  * Checks alert rules and sends what they find. A rule fires once per
  * episode: the same finding (fingerprint) is never repeated, and nothing is
- * sent again within the rule's cooldown.
+ * sent again within the rule's cooldown. An "All brands" rule keeps its
+ * episode and cooldown per brand, so one brand's alert never hides another's.
  */
 class AlertEvaluator
 {
+    /**
+     * Payload key holding the finding's fingerprint on each inbox event.
+     */
+    public const FINGERPRINT = '_fingerprint';
+
     public function __construct(
         protected Metrics $metrics,
         protected AlertNotifier $notifier,
@@ -81,9 +89,10 @@ class AlertEvaluator
 
     protected function fire(AlertRule $rule, Brand $brand, array $finding): bool
     {
-        $inCooldown = $rule->last_triggered_at?->gt(now()->subHours($rule->cooldown_hours));
+        [$fingerprint, $triggeredAt] = $this->lastState($rule, $brand);
+        $inCooldown = $triggeredAt?->gt(now()->subHours($rule->cooldown_hours));
 
-        if ($rule->last_fingerprint === $finding['fingerprint'] || $inCooldown) {
+        if ($fingerprint === $finding['fingerprint'] || $inCooldown) {
             return false;
         }
 
@@ -96,12 +105,48 @@ class AlertEvaluator
             type: $rule->type->value,
             brandId: $rule->type->isBrandLevel() ? $brand->getKey() : null,
             ruleId: $rule->getKey(),
-            payload: $finding['payload'] ?? [],
+            payload: ($finding['payload'] ?? []) + [self::FINGERPRINT => $finding['fingerprint']],
         ), $rule->channels ?: null);
 
+        // Kept on the rule too, for the "Last sent" column and single-brand rules.
         $rule->forceFill(['last_fingerprint' => $finding['fingerprint'], 'last_triggered_at' => now()])->save();
 
         return true;
+    }
+
+    /**
+     * The last fingerprint and send time for this rule and brand. Rules for one
+     * brand (or the whole account) keep them on the rule; "All brands" rules
+     * read them from the brand's latest event in the alerts inbox.
+     *
+     * @return array{0: ?string, 1: ?CarbonInterface}
+     */
+    protected function lastState(AlertRule $rule, Brand $brand): array
+    {
+        if (! $this->isPerBrand($rule)) {
+            return [$rule->last_fingerprint, $rule->last_triggered_at];
+        }
+
+        $event = AlertEvent::query()
+            ->where('alert_rule_id', $rule->getKey())
+            ->where('brand_id', $brand->getKey())
+            ->latest('id')
+            ->first();
+
+        return [$event?->payload[self::FINGERPRINT] ?? null, $event?->created_at];
+    }
+
+    /**
+     * When the rule last fired for this brand.
+     */
+    protected function lastTriggeredAt(AlertRule $rule, Brand $brand): ?CarbonInterface
+    {
+        return $this->lastState($rule, $brand)[1];
+    }
+
+    protected function isPerBrand(AlertRule $rule): bool
+    {
+        return $rule->brand_id === null && $rule->type->isBrandLevel();
     }
 
     protected function filters(Brand $brand, int $days, ?string $engine = null): ReportFilters
@@ -159,7 +204,7 @@ class AlertEvaluator
             ->where('brand_id', $brand->getKey())
             ->where('status', Candidate::STATUS_CLASSIFIED)
             ->where('label', CompetitorLabel::DirectCompetitor)
-            ->where('classified_at', '>', $rule->last_triggered_at ?? $rule->created_at)
+            ->where('classified_at', '>', $this->lastTriggeredAt($rule, $brand) ?? $rule->created_at)
             ->orderByDesc('score')
             ->get();
 
@@ -181,21 +226,29 @@ class AlertEvaluator
         $previous = max(1, (int) $rule->option('previous'));
         $lost = [];
 
+        // Compared run by run: with several samples per prompt, one sample
+        // without the brand is noise, not a loss.
         $results = Result::query()
             ->where('brand_id', $brand->getKey())
             ->where('status', ResultStatus::Success)
             ->where('ran_at', '>=', now()->subDays(60))
+            ->whereNotIn('run_id', Run::query()->select('id')->whereIn('status', [RunStatus::Pending, RunStatus::Running]))
             ->orderByDesc('ran_at')
+            ->orderByDesc('id')
             ->with('prompt:id,text')
-            ->get(['id', 'prompt_id', 'engine', 'brand_mentioned', 'ran_at'])
+            ->get(['id', 'run_id', 'prompt_id', 'engine', 'brand_mentioned', 'ran_at'])
             ->groupBy(fn (Result $r) => $r->prompt_id . '|' . $r->engine);
 
         foreach ($results as $answers) {
-            $latest = $answers->first();
-            $before = $answers->slice(1, $previous);
+            // Newest run first; each run is mentioned when any of its samples mentions the brand.
+            $runs = $answers->groupBy(fn (Result $r) => $r->run_id ?? 'result:' . $r->getKey())->values();
+            $latest = $runs->first();
+            $before = $runs->slice(1, $previous);
 
-            if (! $latest->brand_mentioned && $before->count() === $previous && $before->every(fn ($r) => $r->brand_mentioned)) {
-                $lost[] = $latest;
+            if ($latest->every(fn ($r) => ! $r->brand_mentioned)
+                && $before->count() === $previous
+                && $before->every(fn ($samples) => $samples->contains(fn ($r) => $r->brand_mentioned))) {
+                $lost[] = $latest->first();
             }
         }
 
