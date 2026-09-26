@@ -2,7 +2,7 @@
 
 ## v1.0.0-beta.1 — 2026-09-26
 
-First public beta. Everything below the "Unreleased" headings that follow is included in this release.
+First public beta. It includes everything in the sections below.
 
 Also in this release:
 
