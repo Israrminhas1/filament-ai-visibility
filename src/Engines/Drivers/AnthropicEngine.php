@@ -4,12 +4,16 @@ namespace IsrarMinhas\FilamentAiVisibility\Engines\Drivers;
 
 use Illuminate\Http\Client\PendingRequest;
 use Illuminate\Http\Client\Response;
+use IsrarMinhas\FilamentAiVisibility\Engines\BatchStatus;
 use IsrarMinhas\FilamentAiVisibility\Engines\CompletionResponse;
 use IsrarMinhas\FilamentAiVisibility\Engines\CompletionRequest;
+use IsrarMinhas\FilamentAiVisibility\Engines\Contracts\SupportsBatches;
 use IsrarMinhas\FilamentAiVisibility\Engines\EngineRequest;
+use IsrarMinhas\FilamentAiVisibility\Engines\EngineRequestFailed;
 use IsrarMinhas\FilamentAiVisibility\Engines\EngineResponse;
+use IsrarMinhas\FilamentAiVisibility\Enums\PauseReason;
 
-class AnthropicEngine extends HttpEngine
+class AnthropicEngine extends HttpEngine implements SupportsBatches
 {
     public function key(): string
     {
@@ -56,12 +60,7 @@ class AnthropicEngine extends HttpEngine
         $model = $request->model;
 
         for ($turn = 0; $turn < 3; $turn++) {
-            $response = $this->send(fn () => $http->post('/messages', [
-                'model' => $request->model,
-                'max_tokens' => (int) config('ai-visibility.tracking.max_output_tokens', 4096),
-                'messages' => $messages,
-                'tools' => [$this->webSearchTool($request)],
-            ]));
+            $response = $this->send(fn () => $http->post('/messages', $this->askParams($request, $messages)));
 
             $content = $response->json('content', []);
             $blocks = [...$blocks, ...$content];
@@ -78,6 +77,93 @@ class AnthropicEngine extends HttpEngine
         }
 
         return $this->answerFromBlocks($blocks, $model, $inputTokens, $outputTokens, $searches);
+    }
+
+    /**
+     * @param  array<int, array<string, mixed>>  $messages
+     * @return array<string, mixed>
+     */
+    protected function askParams(EngineRequest $request, array $messages): array
+    {
+        return [
+            'model' => $request->model,
+            'max_tokens' => (int) config('ai-visibility.tracking.max_output_tokens', 4096),
+            'messages' => $messages,
+            'tools' => [$this->webSearchTool($request)],
+        ];
+    }
+
+    /**
+     * Economy mode: the Message Batches API. A batch answer is a single turn,
+     * so an answer that paused mid-search keeps what it had so far.
+     */
+    public function submitBatch(string $apiKey, array $requests): string
+    {
+        $items = [];
+
+        foreach ($requests as $customId => $request) {
+            $items[] = [
+                'custom_id' => (string) $customId,
+                'params' => $this->askParams($request, [['role' => 'user', 'content' => $request->prompt]]),
+            ];
+        }
+
+        return (string) $this->send(fn () => $this->http($apiKey)->post('/messages/batches', ['requests' => $items]))->json('id');
+    }
+
+    public function batchStatus(string $apiKey, string $batchId): BatchStatus
+    {
+        $batch = $this->send(fn () => $this->http($apiKey)->get("/messages/batches/{$batchId}"));
+
+        return $batch->json('processing_status') === 'ended'
+            ? new BatchStatus(BatchStatus::DONE)
+            : new BatchStatus(BatchStatus::PENDING);
+    }
+
+    public function batchResults(string $apiKey, string $batchId): iterable
+    {
+        $content = $this->send(fn () => $this->http($apiKey)->get("/messages/batches/{$batchId}/results"))->body();
+
+        foreach (preg_split('/\r?\n/', trim($content)) as $line) {
+            $item = json_decode($line, true);
+
+            if (! is_array($item) || ! isset($item['custom_id'])) {
+                continue;
+            }
+
+            $message = (array) data_get($item, 'result.message', []);
+
+            yield $item['custom_id'] => match (data_get($item, 'result.type')) {
+                'succeeded' => $this->answerFromBlocks(
+                    (array) ($message['content'] ?? []),
+                    (string) ($message['model'] ?? ''),
+                    (int) data_get($message, 'usage.input_tokens', 0),
+                    (int) data_get($message, 'usage.output_tokens', 0),
+                    (int) data_get($message, 'usage.server_tool_use.web_search_requests', 0),
+                ),
+                'errored' => new EngineRequestFailed(
+                    $this->label() . ': ' . (data_get($item, 'result.error.error.message') ?? 'The batch request failed.'),
+                    self::batchErrorReason((string) data_get($item, 'result.error.error.type')),
+                ),
+                // Expired or canceled: it never ran, so it is retried in real time.
+                default => new EngineRequestFailed(
+                    $this->label() . ': the batch request ' . data_get($item, 'result.type', 'failed') . '.',
+                    PauseReason::ProviderOutage,
+                ),
+            };
+        }
+    }
+
+    protected static function batchErrorReason(string $type): ?PauseReason
+    {
+        return match ($type) {
+            'authentication_error', 'permission_error' => PauseReason::InvalidKey,
+            'billing_error' => PauseReason::InsufficientCredits,
+            'rate_limit_error' => PauseReason::RateLimited,
+            'overloaded_error', 'api_error' => PauseReason::ProviderOutage,
+            'not_found_error' => PauseReason::ModelUnavailable,
+            default => null,
+        };
     }
 
     /**

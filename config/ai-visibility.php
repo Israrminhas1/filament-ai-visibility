@@ -63,6 +63,8 @@ return [
         'gemini' => env('AI_VISIBILITY_GEMINI_KEY'),
         'grok' => env('AI_VISIBILITY_GROK_KEY'),
         'perplexity' => env('AI_VISIBILITY_PERPLEXITY_KEY'),
+        // Used by the Google AI Overviews and Google AI Mode engines.
+        'serpapi' => env('AI_VISIBILITY_SERPAPI_KEY'),
     ],
 
     /*
@@ -103,6 +105,17 @@ return [
             'helper_model' => 'sonar',
             'models' => ['sonar', 'sonar-pro'],
         ],
+        // Google's own AI answers, read through SerpAPI (no model choice).
+        'google_ai_overview' => [
+            'tracking_model' => 'google_ai_overview',
+            'helper_model' => 'google_ai_overview',
+            'models' => ['google_ai_overview'],
+        ],
+        'google_ai_mode' => [
+            'tracking_model' => 'google_ai_mode',
+            'helper_model' => 'google_ai_mode',
+            'models' => ['google_ai_mode'],
+        ],
     ],
 
     /*
@@ -133,6 +146,8 @@ return [
         'gemini' => 0.01,
         'grok' => 0.02,
         'perplexity' => 0.008,
+        'google_ai_overview' => 0.015,
+        'google_ai_mode' => 0.015,
     ],
 
     /*
@@ -196,6 +211,8 @@ return [
             'gemini' => [0.30, 2.50],
             'grok' => [3.00, 15.00],
             'perplexity' => [1.00, 1.00],
+            'google_ai_overview' => [0.0, 0.0],
+            'google_ai_mode' => [0.0, 0.0],
         ],
         // USD per web search / grounded request.
         'search_fee' => [
@@ -204,7 +221,28 @@ return [
             'gemini' => 0.035,
             'grok' => 0.01,
             'perplexity' => 0.008,
+            // Per SerpAPI search; depends on your SerpAPI plan.
+            'google_ai_overview' => 0.015,
+            'google_ai_mode' => 0.015,
         ],
+        // Token discount for economy (batch) mode.
+        'batch_discount' => 0.5,
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
+    | Economy mode
+    |--------------------------------------------------------------------------
+    |
+    | When turned on in Settings, scheduled runs on OpenAI and Claude use the
+    | providers' batch APIs: about half the token cost, answers within 24
+    | hours. Manual runs always answer in real time. Anything a batch cannot
+    | answer is retried in real time after `give_up_after_hours`.
+    |
+    */
+    'economy' => [
+        'max_batch_size' => 1000,
+        'give_up_after_hours' => 26,
     ],
 
     /*
@@ -304,6 +342,7 @@ return [
             'enabled' => [],
             'models' => [],
             'requests_per_minute' => 20,
+            'economy' => false,
         ],
         'runs' => [
             'samples' => 1,

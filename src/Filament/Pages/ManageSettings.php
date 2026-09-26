@@ -69,6 +69,7 @@ class ManageSettings extends Page
             'limits' => array_map(fn ($value) => $value ? $value : null, $all['limits'] ?? []),
             'engines' => EngineFields::fill($all['engines']['enabled'] ?? [], $all['engines']['models'] ?? []),
             'engines_rpm' => $all['engines']['requests_per_minute'] ?? 20,
+            'engines_economy' => (bool) ($all['engines']['economy'] ?? false),
             'kill_switch' => $settings->killSwitch(),
         ]);
     }
@@ -92,6 +93,9 @@ class ManageSettings extends Page
                                 ->minValue(1)
                                 ->maxValue(600)
                                 ->helperText('Keeps runs under provider rate limits. Lower it if an engine keeps getting rate limited.'),
+                            Toggle::make('engines_economy')
+                                ->label('Economy mode for scheduled runs')
+                                ->helperText('OpenAI and Claude answer scheduled runs through their batch APIs: about half the token cost, with answers arriving within 24 hours instead of minutes. Manual runs are always real time. Anything a batch cannot answer is retried in real time.'),
                         ]),
 
                     Tab::make('Runs & limits')
@@ -299,6 +303,7 @@ class ManageSettings extends Page
                 'enabled' => $engines['enabled'],
                 'models' => $engines['models'],
                 'requests_per_minute' => (int) ($state['engines_rpm'] ?? 20),
+                'economy' => (bool) ($state['engines_economy'] ?? false),
             ],
             'runs' => $state['runs'] ?? [],
             // 0 means "no limit"; null would fall back to the default.

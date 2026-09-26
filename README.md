@@ -1,8 +1,8 @@
 # Filament AI Visibility
 
-Track how your brand shows up in answers from ChatGPT, Claude, Gemini, Perplexity and Grok — with competitor intelligence, inside your own Filament panel. Bring your own API keys; one key is enough to start.
+Track how your brand shows up in answers from ChatGPT, Claude, Gemini, Perplexity, Grok and Google's AI Overviews / AI Mode — with competitor intelligence, inside your own Filament panel. Bring your own API keys; one key is enough to start.
 
-> **Status: in development (Milestone 7 of 8).** Everything except economy (batch) mode and Google AI Overviews / AI Mode tracking works, including **alert rules and scheduled reports**. See [`docs/SPEC.md`](docs/SPEC.md) for the full plan.
+> **Status: 1.0 release candidate.** Every planned feature is built and tested on Filament 4 and 5. See [`docs/SPEC.md`](docs/SPEC.md) for the design.
 
 ## Requirements
 
@@ -11,6 +11,7 @@ Track how your brand shows up in answers from ChatGPT, Claude, Gemini, Perplexit
 - Filament 4.x (Livewire 3) or Filament 5.x (Livewire 4)
 - A queue worker and the Laravel scheduler
 - An API key for at least one of: OpenAI, Anthropic, Google Gemini, xAI (Grok), Perplexity
+- Optional: a [SerpAPI](https://serpapi.com) key for Google AI Overviews / AI Mode and "People also ask" keywords
 
 ## Installation
 
@@ -68,6 +69,10 @@ Each run asks every active prompt on every enabled engine (× samples per prompt
 | Gemini | Grounding with Google Search |
 | Grok | xAI Responses API with the `web_search` tool |
 | Perplexity | Sonar (always searches) |
+| Google AI Overviews | The AI Overview on a Google search, through SerpAPI |
+| Google AI Mode | Google AI Mode, through SerpAPI |
+
+Both Google engines share one SerpAPI key and cost one SerpAPI search per answer (two when an overview loads separately). When Google shows no AI answer for a search, that is recorded as an answer without a mention rather than a failure. They only track answers: helper features always use one of the other engines.
 
 The brand's market (e.g. "United Kingdom" or "GB") is sent as the search location where the engine supports it.
 
@@ -78,6 +83,12 @@ For every answer AI Visibility records:
 - tokens, searches and cost
 
 Runs start on each brand's schedule (daily, weekly or manual, at the time set in Settings), or with **Run now** on a brand, which shows the answer count and estimated cost first. The **Runs** and **Answers** screens show progress and every answer, with the brand and competitors highlighted.
+
+### Economy mode
+
+Turn on **Settings → Engines → Economy mode** to send scheduled runs on OpenAI and Claude through their batch APIs. Tokens cost about half as much; answers arrive within 24 hours instead of minutes. Manual runs are always answered in real time, and other engines are unaffected.
+
+`ai-visibility:poll-batches` (every 5 minutes) collects finished batches. Nothing is lost if a batch goes wrong: a failed or expired batch, an answer the provider rejected, or a batch still unfinished after 26 hours is answered again in real time. A bad key or empty credit balance pauses the engine exactly as it does for real-time runs. The run page shows how many answers are still waiting.
 
 Before a run starts, it's refused (with the reason) if setup is unfinished, "Pause everything" is on, no engine is usable, there are no active prompts, the queue is `sync`, the daily run limit is reached, or the estimated cost exceeds the remaining budget.
 
@@ -180,7 +191,7 @@ Keys are found in this order:
 
 1. Saved in the panel (**Settings → Engines**), stored encrypted and never sent back to the browser.
 2. [AI Monitor](https://github.com/Israrminhas1/filament-aimonitor), if installed.
-3. Environment variables: `AI_VISIBILITY_OPENAI_KEY`, `AI_VISIBILITY_ANTHROPIC_KEY`, `AI_VISIBILITY_GEMINI_KEY`, `AI_VISIBILITY_GROK_KEY`, `AI_VISIBILITY_PERPLEXITY_KEY`.
+3. Environment variables: `AI_VISIBILITY_OPENAI_KEY`, `AI_VISIBILITY_ANTHROPIC_KEY`, `AI_VISIBILITY_GEMINI_KEY`, `AI_VISIBILITY_GROK_KEY`, `AI_VISIBILITY_PERPLEXITY_KEY`, `AI_VISIBILITY_SERPAPI_KEY` (both Google engines).
 
 ## When something goes wrong
 
@@ -241,10 +252,11 @@ AiVisibilityPlugin::make()
 | `ai-visibility:sync-keywords {--brand=ID} {--all}` | Pull keywords from connected sources (due ones run daily) |
 | `ai-visibility:alerts {--watch}` | Check alert rules (daily) or just the queue watchdog (every 10 minutes) |
 | `ai-visibility:send-reports` | Send scheduled reports that are due (hourly) |
+| `ai-visibility:poll-batches` | Store answers from finished economy-mode batches (every 5 minutes) |
 
 ## Costs
 
-Every call is recorded with its tokens, searches and cost. Prices come from [AI Monitor](https://github.com/Israrminhas1/filament-aimonitor) when it's installed (and every call is also logged there), otherwise from `pricing` in `config/ai-visibility.php`. The bundled prices are estimates, so check them against each provider's pricing page.
+Every call is recorded with its tokens, searches and cost. Prices come from [AI Monitor](https://github.com/Israrminhas1/filament-aimonitor) when it's installed (and every call is also logged there), otherwise from `pricing` in `config/ai-visibility.php`. The bundled prices are estimates, so check them against each provider's pricing page. Economy-mode answers get `pricing.batch_discount` (50%) off their token cost; search fees are not discounted. SerpAPI searches are priced at `pricing.search_fee.google_ai_overview` / `google_ai_mode`, which depends on your SerpAPI plan.
 
 ## Testing
 

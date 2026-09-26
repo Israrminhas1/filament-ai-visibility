@@ -32,8 +32,10 @@ class KeyResolver
      */
     public function source(string $engine): array
     {
+        $credential = $this->credential($engine);
+
         $stored = ProviderKey::query()
-            ->where('engine', $engine)
+            ->where('engine', $credential)
             ->where('is_active', true)
             ->first();
 
@@ -49,7 +51,7 @@ class KeyResolver
             }
         }
 
-        if (filled($key = config("ai-visibility.keys.{$engine}"))) {
+        if (filled($key = config("ai-visibility.keys.{$credential}"))) {
             return ['key' => $key, 'source' => 'env'];
         }
 
@@ -59,13 +61,21 @@ class KeyResolver
     public function store(string $engine, string $apiKey): ProviderKey
     {
         return ProviderKey::query()->updateOrCreate(
-            ['engine' => $engine],
+            ['engine' => $this->credential($engine)],
             ['api_key' => trim($apiKey), 'is_active' => true],
         );
     }
 
     public function remove(string $engine): void
     {
-        ProviderKey::query()->where('engine', $engine)->delete();
+        ProviderKey::query()->where('engine', $this->credential($engine))->delete();
+    }
+
+    /**
+     * Engines that share a provider share one stored key (e.g. both Google engines use "serpapi").
+     */
+    protected function credential(string $engine): string
+    {
+        return $this->engines->has($engine) ? $this->engines->get($engine)->credentialKey() : $engine;
     }
 }

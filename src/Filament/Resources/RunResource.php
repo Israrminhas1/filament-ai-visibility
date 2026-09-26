@@ -15,6 +15,7 @@ use IsrarMinhas\FilamentAiVisibility\Enums\RunTrigger;
 use IsrarMinhas\FilamentAiVisibility\Filament\Concerns\HasAiVisibilityNavigation;
 use IsrarMinhas\FilamentAiVisibility\Filament\Resources\RunResource\Pages;
 use IsrarMinhas\FilamentAiVisibility\Filament\Resources\RunResource\RelationManagers\ResultsRelationManager;
+use IsrarMinhas\FilamentAiVisibility\Models\Batch;
 use IsrarMinhas\FilamentAiVisibility\Models\Run;
 use IsrarMinhas\FilamentAiVisibility\Runs\RunPlanner;
 
@@ -66,6 +67,22 @@ class RunResource extends Resource
                         TextEntry::make('started_at')->dateTime(),
                         TextEntry::make('finished_at')->dateTime()->placeholder('Still running'),
                         TextEntry::make('estimated_cost_usd')->label('Estimated cost')->money('usd', 4),
+                        TextEntry::make('economy')
+                            ->label('Economy mode')
+                            ->columnSpanFull()
+                            ->visible(fn (Run $record) => $record->batches()->exists())
+                            ->state(function (Run $record) {
+                                $waiting = $record->batches()->where('status', Batch::SUBMITTED)->get();
+
+                                return $waiting->isEmpty()
+                                    ? 'Answered through batch APIs at a lower price.'
+                                    : sprintf(
+                                        'Waiting for %d answers from %s batch APIs (sent %s). Batches can take up to 24 hours; anything not answered by then is retried in real time.',
+                                        $waiting->sum(fn (Batch $batch) => count($batch->result_ids ?? [])),
+                                        implode(', ', RunPlanner::engineLabels($waiting->pluck('engine')->unique()->all())),
+                                        $waiting->min('submitted_at')?->diffForHumans(),
+                                    );
+                            }),
                     ]),
             ]);
     }

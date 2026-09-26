@@ -38,6 +38,16 @@ abstract class HttpEngine implements Engine
         return [$this->key()];
     }
 
+    public function credentialKey(): string
+    {
+        return $this->key();
+    }
+
+    public function supportsCompletion(): bool
+    {
+        return true;
+    }
+
     public function testKey(string $apiKey): KeyTestResult
     {
         try {

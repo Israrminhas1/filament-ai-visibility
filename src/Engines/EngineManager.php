@@ -93,7 +93,7 @@ class EngineManager
         $configured = $this->settings->get('helpers.engine', 'auto');
 
         if ($configured !== 'auto') {
-            if (! $this->registry->has($configured) || ! $this->isUsable($configured)) {
+            if (! $this->registry->has($configured) || ! $this->registry->get($configured)->supportsCompletion() || ! $this->isUsable($configured)) {
                 return null;
             }
 
@@ -105,7 +105,7 @@ class EngineManager
         $order = array_unique([...config('ai-visibility.helper_engine_order', []), ...array_keys($this->registry->all())]);
 
         foreach ($order as $key) {
-            if ($this->registry->has($key) && $this->keys->has($key) && $this->isUsable($key)) {
+            if ($this->registry->has($key) && $this->registry->get($key)->supportsCompletion() && $this->keys->has($key) && $this->isUsable($key)) {
                 $engine = $this->registry->get($key);
 
                 return ['engine' => $engine, 'model' => $engine->defaultHelperModel()];

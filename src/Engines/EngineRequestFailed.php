@@ -2,6 +2,7 @@
 
 namespace IsrarMinhas\FilamentAiVisibility\Engines;
 
+use GuzzleHttp\Psr7\Response as Psr7Response;
 use Illuminate\Http\Client\Response;
 use IsrarMinhas\FilamentAiVisibility\Engines\Drivers\HttpEngine;
 use IsrarMinhas\FilamentAiVisibility\Enums\PauseReason;
@@ -32,6 +33,14 @@ class EngineRequestFailed extends RuntimeException
             is_numeric($retryAfter) ? (int) $retryAfter : null,
             $response->status(),
         );
+    }
+
+    /**
+     * A failed item inside a batch, classified like a normal HTTP error.
+     */
+    public static function fromStatus(int $status, string $body, string $message): self
+    {
+        return self::fromResponse(new Response(new Psr7Response($status, [], $body)), $message);
     }
 
     public static function unreachable(string $message): self

@@ -28,7 +28,7 @@ class ResultRecorder
         protected SourceCategory $categories,
     ) {}
 
-    public function record(Result $result, EngineResponse $response, int $durationMs): Result
+    public function record(Result $result, EngineResponse $response, int $durationMs, bool $batch = false): Result
     {
         $brand = $result->brand;
         $competitors = $brand->competitors()->where('is_active', true)->get();
@@ -37,7 +37,7 @@ class ResultRecorder
         $citations = $this->citations->extract($response);
         $brandMention = collect($mentions)->firstWhere('subjectType', 'brand');
 
-        $cost = $this->pricing->cost($result->engine, $response->model, $response->inputTokens, $response->outputTokens, $response->searches);
+        $cost = $this->pricing->cost($result->engine, $response->model, $response->inputTokens, $response->outputTokens, $response->searches, $batch);
 
         DB::transaction(function () use ($result, $response, $durationMs, $brand, $competitors, $mentions, $citations, $brandMention, $cost) {
             foreach ($mentions as $mention) {

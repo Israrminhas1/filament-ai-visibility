@@ -8,10 +8,17 @@ namespace IsrarMinhas\FilamentAiVisibility\Support;
  */
 class Pricing
 {
-    public function cost(string $engine, ?string $model, ?int $inputTokens, ?int $outputTokens, int $searches = 0): float
+    /**
+     * @param  bool  $batch  Answered through a batch API: tokens are discounted, searches are not.
+     */
+    public function cost(string $engine, ?string $model, ?int $inputTokens, ?int $outputTokens, int $searches = 0, bool $batch = false): float
     {
         $tokens = AiMonitor::cost($engine, $model, $inputTokens, $outputTokens)
             ?? $this->tokenCost($engine, $model, $inputTokens, $outputTokens);
+
+        if ($batch) {
+            $tokens *= 1 - min(1, max(0, (float) config('ai-visibility.pricing.batch_discount', 0.5)));
+        }
 
         $searchFee = (float) config("ai-visibility.pricing.search_fee.{$engine}", 0);
 

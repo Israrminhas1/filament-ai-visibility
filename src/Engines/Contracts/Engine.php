@@ -45,6 +45,18 @@ interface Engine
     public function aiMonitorProviders(): array;
 
     /**
+     * Name the API key is stored under. Engines sharing a provider share it
+     * (both Google engines use the "serpapi" key).
+     */
+    public function credentialKey(): string;
+
+    /**
+     * Whether the engine can serve helper calls (classification, generation…).
+     * Search-only engines like Google AI Overviews cannot.
+     */
+    public function supportsCompletion(): bool;
+
+    /**
      * Check that a key works with a cheap request.
      */
     public function testKey(string $apiKey): KeyTestResult;

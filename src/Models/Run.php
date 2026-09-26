@@ -34,6 +34,14 @@ class Run extends Model
         return $this->hasMany(Result::class);
     }
 
+    /**
+     * Economy-mode batches sent for this run.
+     */
+    public function batches(): HasMany
+    {
+        return $this->hasMany(Batch::class);
+    }
+
     public function isFinished(): bool
     {
         return $this->finished_at !== null;

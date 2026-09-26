@@ -14,6 +14,7 @@ use IsrarMinhas\FilamentAiVisibility\Enums\RunTrigger;
 use IsrarMinhas\FilamentAiVisibility\Events\RunStarted;
 use IsrarMinhas\FilamentAiVisibility\Exceptions\RunNotStarted;
 use IsrarMinhas\FilamentAiVisibility\Jobs\RunResultJob;
+use IsrarMinhas\FilamentAiVisibility\Jobs\SubmitBatchJob;
 use IsrarMinhas\FilamentAiVisibility\Models\Brand;
 use IsrarMinhas\FilamentAiVisibility\Models\Model;
 use IsrarMinhas\FilamentAiVisibility\Models\Result;
@@ -150,18 +151,38 @@ class RunPlanner
             ])->save();
         });
 
-        $this->dispatch($run, onlyPending: true);
+        $this->dispatch($run, realtimeOnly: true);
 
         return $skipped;
     }
 
-    protected function dispatch(Run $run, bool $onlyPending = false): void
+    /**
+     * One job per result, or batches for engines in economy mode (scheduled runs only).
+     */
+    protected function dispatch(Run $run, bool $realtimeOnly = false): void
     {
+        $economy = app(Economy::class);
+        $batched = [];
+
         $run->results()
             ->where('status', ResultStatus::Pending)
             ->select(['id', 'engine'])
             ->orderBy('id')
-            ->each(fn (Result $result) => RunResultJob::dispatch($result->getKey(), $result->engine, $run->tenant_id));
+            ->each(function (Result $result) use ($run, $economy, $realtimeOnly, &$batched) {
+                if (! $realtimeOnly && $economy->applies($run, $result->engine)) {
+                    $batched[$result->engine][] = $result->getKey();
+
+                    return;
+                }
+
+                RunResultJob::dispatch($result->getKey(), $result->engine, $run->tenant_id);
+            });
+
+        foreach ($batched as $engine => $ids) {
+            foreach (array_chunk($ids, (int) config('ai-visibility.economy.max_batch_size', 1000)) as $chunk) {
+                SubmitBatchJob::dispatch($run->getKey(), $engine, $chunk, $run->tenant_id);
+            }
+        }
     }
 
     /**

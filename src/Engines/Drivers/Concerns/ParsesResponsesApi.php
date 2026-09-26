@@ -14,11 +14,19 @@ trait ParsesResponsesApi
 {
     protected function parseAnswer(Response $response, EngineRequest $request): EngineResponse
     {
+        return $this->answerFromPayload((array) $response->json(), $request->model);
+    }
+
+    /**
+     * @param  array<string, mixed>  $json  A Responses API response body.
+     */
+    protected function answerFromPayload(array $json, string $model): EngineResponse
+    {
         $text = [];
         $citations = [];
         $searches = 0;
 
-        foreach ($response->json('output', []) as $item) {
+        foreach ((array) data_get($json, 'output', []) as $item) {
             if (($item['type'] ?? null) === 'web_search_call') {
                 $searches++;
             }
@@ -43,18 +51,18 @@ trait ParsesResponsesApi
         }
 
         // xAI can also return a top-level list of citation URLs.
-        foreach ((array) $response->json('citations', []) as $citation) {
+        foreach ((array) data_get($json, 'citations', []) as $citation) {
             $citations[] = $citation;
         }
 
         return new EngineResponse(
             answer: trim(implode("\n\n", $text)),
             citations: EngineResponse::uniqueCitations($citations),
-            model: $response->json('model') ?? $request->model,
-            inputTokens: $response->json('usage.input_tokens'),
-            outputTokens: $response->json('usage.output_tokens'),
+            model: data_get($json, 'model') ?? $model,
+            inputTokens: data_get($json, 'usage.input_tokens'),
+            outputTokens: data_get($json, 'usage.output_tokens'),
             // xAI reports sources used rather than separate search calls.
-            searches: $searches ?: ((int) $response->json('usage.num_sources_used', 0) > 0 ? 1 : 0),
+            searches: $searches ?: ((int) data_get($json, 'usage.num_sources_used', 0) > 0 ? 1 : 0),
         );
     }
 }

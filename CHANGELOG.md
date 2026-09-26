@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased — Milestone 8 (1.0)
+
+- Google AI Overviews and Google AI Mode engines through SerpAPI, sharing one key (`AI_VISIBILITY_SERPAPI_KEY`). Separately loaded overviews are fetched automatically; searches without an AI answer are recorded, not failed. Key and quota problems pause the engines like any other.
+- Economy mode: scheduled runs on OpenAI and Claude use the batch APIs at about half the token cost. Failed, expired, rejected or overdue batch answers are retried in real time; account errors pause the engine. New `ai-visibility:poll-batches` command (every 5 minutes) and a waiting notice on the run page.
+- Engines that share a provider share a stored key; engines that cannot answer plain prompts are never picked for helper features.
+
 ## Unreleased — Milestone 7 (alerts and scheduled reports)
 
 - Alert rules: visibility drop, competitor overtakes, new direct competitor, prompt lost, negative sentiment, budget threshold, run failed. Per-rule channels and cooldown; one alert per episode.

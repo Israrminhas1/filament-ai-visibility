@@ -12,11 +12,14 @@ use IsrarMinhas\FilamentAiVisibility\Commands\SendReportsCommand;
 use IsrarMinhas\FilamentAiVisibility\Commands\EnginesCommand;
 use IsrarMinhas\FilamentAiVisibility\Commands\HealthCommand;
 use IsrarMinhas\FilamentAiVisibility\Commands\InstallCommand;
+use IsrarMinhas\FilamentAiVisibility\Commands\PollBatchesCommand;
 use IsrarMinhas\FilamentAiVisibility\Commands\ProbeCommand;
 use IsrarMinhas\FilamentAiVisibility\Commands\RunCommand;
 use IsrarMinhas\FilamentAiVisibility\Commands\SyncKeywordsCommand;
 use IsrarMinhas\FilamentAiVisibility\Engines\Drivers\AnthropicEngine;
 use IsrarMinhas\FilamentAiVisibility\Engines\Drivers\GeminiEngine;
+use IsrarMinhas\FilamentAiVisibility\Engines\Drivers\GoogleAiModeEngine;
+use IsrarMinhas\FilamentAiVisibility\Engines\Drivers\GoogleAiOverviewEngine;
 use IsrarMinhas\FilamentAiVisibility\Engines\Drivers\GrokEngine;
 use IsrarMinhas\FilamentAiVisibility\Engines\Drivers\OpenAiEngine;
 use IsrarMinhas\FilamentAiVisibility\Engines\Drivers\PerplexityEngine;
@@ -70,6 +73,7 @@ class AiVisibilityServiceProvider extends PackageServiceProvider
                 'add_ai_visibility_analysis_columns',
                 'create_ai_visibility_connections_table',
                 'create_ai_visibility_automation_tables',
+                'create_ai_visibility_batches_table',
             ])
             ->hasCommands([
                 InstallCommand::class,
@@ -81,6 +85,7 @@ class AiVisibilityServiceProvider extends PackageServiceProvider
                 SyncKeywordsCommand::class,
                 AlertsCommand::class,
                 SendReportsCommand::class,
+                PollBatchesCommand::class,
             ]);
     }
 
@@ -89,7 +94,7 @@ class AiVisibilityServiceProvider extends PackageServiceProvider
         $this->app->singleton(EngineRegistry::class, function () {
             $registry = new EngineRegistry;
 
-            foreach ([OpenAiEngine::class, AnthropicEngine::class, GeminiEngine::class, GrokEngine::class, PerplexityEngine::class] as $engine) {
+            foreach ([OpenAiEngine::class, AnthropicEngine::class, GeminiEngine::class, GrokEngine::class, PerplexityEngine::class, GoogleAiOverviewEngine::class, GoogleAiModeEngine::class] as $engine) {
                 $registry->register($engine);
             }
 
@@ -207,6 +212,12 @@ class AiVisibilityServiceProvider extends PackageServiceProvider
                 ->everyFiveMinutes()
                 ->withoutOverlapping()
                 ->name('ai-visibility:probe');
+
+            // Economy mode: collect finished batches.
+            $schedule->command('ai-visibility:poll-batches')
+                ->everyFiveMinutes()
+                ->withoutOverlapping()
+                ->name('ai-visibility:poll-batches');
         });
     }
 }
