@@ -456,7 +456,6 @@ return [
             'persona' => null,
             'ai_review' => true,
             'min_quality' => 4,
-            'prompts_per_keyword' => 2,
         ],
         'instructions' => [
             'generation' => null,
@@ -474,6 +473,7 @@ return [
             'database' => true,
         ],
         'data' => [
+            // Days to keep full answer text (0 = forever). Metrics are kept; see ai-visibility:prune.
             'keep_answers_days' => 365,
         ],
     ],
@@ -487,7 +487,6 @@ return [
         'engines.enabled',
         'engines.models',
         'runs.samples',
-        'runs.frequency',
         'limits.max_competitors_per_brand',
         'limits.max_active_prompts_per_brand',
         'limits.max_runs_per_brand_per_day',

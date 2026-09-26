@@ -303,7 +303,7 @@ class ManageSettings extends Page
                                 ->label('Keep full answer text for (days)')
                                 ->numeric()
                                 ->minValue(7)
-                                ->helperText('Older answers are removed to save space. Metrics are kept.'),
+                                ->helperText('The text of older answers is removed daily to save space. Mentions, sources and all report numbers are kept. Leave empty to keep answers forever.'),
                         ]),
                 ]),
         ];

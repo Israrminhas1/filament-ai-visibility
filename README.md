@@ -4,6 +4,19 @@ Track how your brand shows up in answers from ChatGPT, Claude, Gemini, Perplexit
 
 > **Status: 1.0 release candidate.** Every planned feature is built and tested on Filament 4 and 5. See [`docs/SPEC.md`](docs/SPEC.md) for the design.
 
+## Documentation
+
+This README is an overview of the features. The developer documentation is in [`docs/`](docs/README.md):
+
+- [Installation](docs/installation.md): requirements, install command, setup wizard, upgrading, uninstalling
+- [Queues and scheduler](docs/queues-and-scheduler.md): jobs, scheduled tasks, `retry_after`, how many workers, Supervisor and Horizon
+- [Configuration](docs/configuration.md): every config key and env var, the Settings page, per-brand overrides
+- [Plugin options](docs/plugin-options.md): every `AiVisibilityPlugin` method
+- [Permissions and tenancy](docs/permissions-and-tenancy.md): access control and multi-tenancy
+- [Engines and costs](docs/engines-and-costs.md): each engine, API keys, economy mode, pricing, estimates, budgets
+- [Extending](docs/extending.md): custom engines and keyword sources, events, container bindings, AI instructions, views
+- [Troubleshooting](docs/troubleshooting.md): Health checks, paused engines, stuck runs, detection, emails, multi-server
+
 ## Requirements
 
 - PHP 8.2+
@@ -42,7 +55,7 @@ php artisan queue:work
 
 Some jobs run for a long time: answering a prompt can take up to 4 minutes (web searches are slow) and re-checking a brand's past answers up to 15 minutes. Laravel's default `retry_after` is 90 seconds, after which a still-running job is handed to a second worker. Raise it for the queue connection AI Visibility uses, e.g. `DB_QUEUE_RETRY_AFTER=960` (or `REDIS_QUEUE_RETRY_AFTER=960`), and start the worker with a matching timeout: `php artisan queue:work --timeout=930`.
 
-To keep AI Visibility off your app's main queue, set `AI_VISIBILITY_QUEUE_CONNECTION` and/or `AI_VISIBILITY_QUEUE` (e.g. `ai-visibility`) and run a worker for it: `php artisan queue:work --queue=ai-visibility --timeout=930`. In production keep the worker running with Supervisor or Laravel Horizon.
+Out of the box everything runs on your app's default queue. Each answer waits 10–60 seconds on a web search, so one worker handles only a few answers a minute. For real volumes, put tracking on its own queue (`AI_VISIBILITY_QUEUE_TRACKING`) with several worker processes, and background work on another (`AI_VISIBILITY_QUEUE_ANALYSIS`, `AI_VISIBILITY_QUEUE_CLASSIFICATION`). [Queues and scheduler](docs/queues-and-scheduler.md) has ready-made setups, a Supervisor config and a Horizon config.
 
 Then open **AI Visibility** in your panel. The setup wizard walks you through the rest.
 
@@ -214,22 +227,21 @@ Engines pause themselves instead of failing over and over:
 |---|---|
 | Key missing or removed | Engine pauses; resumes as soon as a key is added |
 | Key rejected | Engine pauses until you fix the key and click **Test & resume** |
-| Out of credits | Engine pauses; you're alerted immediately |
 | Model unavailable | Engine pauses; pick another model |
 | Rate limited | Engine slows down (half the requests per minute); pauses after repeated limits and resumes automatically |
 | Provider outage | Requests retry with back-off; after 5 failures in a row the engine pauses for 15 minutes, then is re-tested (pauses grow up to 4 hours) |
-| Out of credits | Re-tested every 6 hours and resumed automatically once credits are added |
+| Out of credits | Engine pauses and you're alerted immediately; re-tested every 6 hours and resumed automatically once credits are added |
 | Monthly budget reached | Engines (or the brand, for a brand budget) pause; resume next month or when the budget is raised |
 
 A paused engine is skipped instantly: its remaining answers are marked **skipped** with the reason, no requests are sent, and nothing is retried in a loop. Once it's fixed, **Retry skipped** on the run collects the missing answers.
 
-Each pause sends **one** alert per incident (not one per failed request), in the panel, by email and to Slack, with the exact fix. These alerts are always on. The **Health** page shows every engine's state, the queue worker and the scheduler, and `php artisan ai-visibility:health` exits with an error code for your monitoring.
+Each pause sends **one** alert per incident (not one per failed request), in the panel, by email and to Slack, with the exact fix. These alerts are always on. The **Health** page shows every engine's state, the queue worker and the scheduler, and `php artisan ai-visibility:health` exits with an error code for your monitoring. See [Troubleshooting](docs/troubleshooting.md).
 
 **Settings → Safety & data → Pause everything** stops all AI Visibility work at once.
 
 ## Limits
 
-Set in **Settings**, and overridable per brand: max brands, competitors per brand, active prompts per brand, keywords per brand, runs per day, and a monthly budget. Limits are enforced everywhere (forms, imports, bulk actions and code), not just in the UI. Prompts imported over the active limit are saved as paused.
+Set in **Settings**: max brands, competitors per brand, active prompts per brand, keywords per brand, runs per brand per day, and a monthly budget. Competitors, active prompts, runs per day and the monthly budget can also be overridden per brand (the brand's **Settings** tab). Limits are enforced everywhere (forms, imports, bulk actions and code), not just in the UI. Prompts imported over the active limit are saved as paused. See [Configuration](docs/configuration.md#per-brand-overrides).
 
 ## Multi-tenancy
 
@@ -238,6 +250,8 @@ When `tenant_support` is on (the default), all data, settings, keys and engine s
 1. A custom resolver: `Tenancy::resolveUsing(fn () => auth()->user()?->team_id);`
 2. The `tenant()` helper (e.g. stancl/tenancy).
 3. Filament's current panel tenant.
+
+Keys saved in the panel are per tenant; keys from AI Monitor or environment variables are shared by every tenant without its own key. See [Permissions and tenancy](docs/permissions-and-tenancy.md).
 
 ## Permissions
 
@@ -259,7 +273,7 @@ AiVisibilityPlugin::make()
 - **Brands → Settings tab**: per-brand engines, samples, limits and monthly budget. The tab is hidden for others, and a save by them never changes these values.
 - **Health**: pausing, resuming and testing engines. Others see the page without its buttons.
 
-Everything else (reports, brands, prompts, keywords, runs, answers, the alerts inbox) follows `authorizeUsing()` only. Screens a user can't open are hidden from the navigation and return 403. Both callbacks receive the logged-in user and are never called for guests (a guest is simply not authorized). Resource policies, if you have them, still apply on top.
+Everything else (reports, brands, prompts, keywords, discovered competitors, runs, answers, the alerts inbox) follows `authorizeUsing()` only. Screens a user can't open are hidden from the navigation and return 403. Both callbacks receive the logged-in user and are never called for guests (a guest is simply not authorized). Resource policies, if you have them, still apply on top.
 
 **Alert recipients**: the "Panel users who receive alerts" picker is searchable and only offers users the current user should see. With Filament tenancy it lists the current tenant's `users()` or `members()`; without such a relationship, only yourself. Without tenancy it starts with yourself, and you search for others. To choose the users yourself:
 
@@ -282,6 +296,8 @@ AiVisibilityPlugin::make()
     ->withoutEngine('grok');
 ```
 
+`->engine()`, `->withoutEngine()` and `->keywordSource()` only take effect in panel requests. Queue workers and scheduled commands need the engine or source registered in the container too; see [Extending](docs/extending.md#where-to-register-extensions). Every option is described in [Plugin options](docs/plugin-options.md).
+
 By default the screens are split into three navigation groups (if you upgrade from a version with a single group, your navigation changes; add `->navigationGroups(false)` to keep one group): **AI Visibility** (Overview and reports), **AI Visibility · Tracking** (Brands, Prompts, Keywords, Keyword sources, Discovered, Runs, Answers) and **AI Visibility · Admin** (Setup, Alerts, Alert rules, Scheduled reports, Settings, Health). `->navigationGroup('Marketing')` puts everything in one group; add `->navigationGroups()` after it to keep the split with that name ("Marketing", "Marketing · Tracking", "Marketing · Admin").
 
 ## Artisan commands
@@ -300,10 +316,11 @@ By default the screens are split into three navigation groups (if you upgrade fr
 | `ai-visibility:poll-batches` | Store answers from finished economy-mode batches (every 5 minutes) |
 | `ai-visibility:sweep-runs` | Close runs whose remaining answers were lost, e.g. after a queue was flushed (hourly) |
 | `ai-visibility:redetect {--brand=ID}` | Check stored answers again with the current brand and competitor names. Runs by itself when a brand's name, aliases or domains, or its competitors, change |
+| `ai-visibility:prune {--dry-run}` | Remove the text of answers older than Settings → "Keep full answer text for"; metrics are kept (daily) |
 
 ## Costs
 
-Every call is recorded with its tokens, searches and cost. Prices come from [AI Monitor](https://github.com/Israrminhas1/filament-aimonitor) when it's installed (and every call is also logged there), otherwise from `pricing` in `config/ai-visibility.php`. The bundled prices are estimates, so check them against each provider's pricing page. Economy-mode answers get `pricing.batch_discount` (50%) off their token cost; search fees are not discounted. SerpAPI searches are priced at `pricing.search_fee.google_ai_overview` / `google_ai_mode`, which depends on your SerpAPI plan.
+Every call is recorded with its tokens, searches and cost ([details](docs/engines-and-costs.md)). Prices come from [AI Monitor](https://github.com/Israrminhas1/filament-aimonitor) when it's installed (and every call is also logged there), otherwise from `pricing` in `config/ai-visibility.php`. The bundled prices are estimates, so check them against each provider's pricing page. Economy-mode answers get `pricing.batch_discount` (50%) off their token cost; search fees are not discounted. SerpAPI searches are priced at `pricing.search_fee.google_ai_overview` / `google_ai_mode`, which depends on your SerpAPI plan.
 
 ## Testing
 

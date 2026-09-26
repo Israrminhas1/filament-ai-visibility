@@ -424,23 +424,79 @@ class AiVisibilityPlugin implements Plugin
             ->resources($resources)
             ->pages($pages)
             ->middleware([RedirectToSetup::class]);
+
+        $this->applyRegistrations();
     }
 
     public function boot(Panel $panel): void
     {
-        $registry = app(EngineRegistry::class);
+        $this->applyRegistrations();
+    }
 
+    /**
+     * Engines and keyword sources set on the plugin. Applied when the panel is
+     * built as well as when it boots, because queue workers and scheduled
+     * commands don't boot panels. Only a service provider is guaranteed to
+     * run in every process: see registerEngine().
+     */
+    protected function applyRegistrations(): void
+    {
         foreach ($this->extraEngines as $engine) {
-            $registry->register($engine);
+            static::registerEngine($engine);
         }
 
         foreach ($this->removedEngines as $key) {
-            $registry->forget($key);
+            static::removeEngine($key);
         }
 
         foreach ($this->keywordSources as $source) {
-            app(KeywordSourceRegistry::class)->register($source);
+            static::registerKeywordSource($source);
         }
+    }
+
+    /**
+     * Register an engine everywhere, including queue workers and scheduled
+     * commands. Call it from a service provider's register() or boot().
+     *
+     * @param  class-string<Engine>|Engine  $engine
+     */
+    public static function registerEngine(string | Engine $engine): void
+    {
+        static::withRegistry(EngineRegistry::class, fn (EngineRegistry $registry) => $registry->register($engine));
+    }
+
+    /**
+     * Remove a built-in engine everywhere. Call it from a service provider.
+     */
+    public static function removeEngine(string $key): void
+    {
+        static::withRegistry(EngineRegistry::class, fn (EngineRegistry $registry) => $registry->forget($key));
+    }
+
+    /**
+     * Register a keyword source everywhere. Call it from a service provider.
+     *
+     * @param  class-string<KeywordSource>|KeywordSource  $source
+     */
+    public static function registerKeywordSource(string | KeywordSource $source): void
+    {
+        static::withRegistry(KeywordSourceRegistry::class, fn (KeywordSourceRegistry $registry) => $registry->register($source));
+    }
+
+    /**
+     * Run a change on a registry now if it exists, or as soon as it is created.
+     *
+     * @param  class-string  $registry
+     */
+    protected static function withRegistry(string $registry, \Closure $change): void
+    {
+        if (app()->resolved($registry)) {
+            $change(app($registry));
+
+            return;
+        }
+
+        app()->afterResolving($registry, fn ($instance) => $change($instance));
     }
 
     protected function screen(string $screen, bool $condition): static

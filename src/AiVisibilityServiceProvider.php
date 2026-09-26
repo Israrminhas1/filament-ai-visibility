@@ -13,6 +13,7 @@ use IsrarMinhas\FilamentAiVisibility\Commands\EnginesCommand;
 use IsrarMinhas\FilamentAiVisibility\Commands\HealthCommand;
 use IsrarMinhas\FilamentAiVisibility\Commands\InstallCommand;
 use IsrarMinhas\FilamentAiVisibility\Commands\PollBatchesCommand;
+use IsrarMinhas\FilamentAiVisibility\Commands\PruneAnswersCommand;
 use IsrarMinhas\FilamentAiVisibility\Commands\ProbeCommand;
 use IsrarMinhas\FilamentAiVisibility\Commands\RedetectCommand;
 use IsrarMinhas\FilamentAiVisibility\Commands\RunCommand;
@@ -90,6 +91,7 @@ class AiVisibilityServiceProvider extends PackageServiceProvider
                 SendReportsCommand::class,
                 PollBatchesCommand::class,
                 SweepRunsCommand::class,
+                PruneAnswersCommand::class,
                 RedetectCommand::class,
             ]);
     }
@@ -232,6 +234,12 @@ class AiVisibilityServiceProvider extends PackageServiceProvider
                 ->hourly()
                 ->withoutOverlapping()
                 ->name('ai-visibility:sweep-runs');
+
+            // Remove the text of answers past Settings → "Keep full answer text for".
+            $schedule->command('ai-visibility:prune')
+                ->dailyAt('03:30')
+                ->withoutOverlapping()
+                ->name('ai-visibility:prune');
         });
     }
 }
