@@ -31,6 +31,8 @@ class SendEngineAlerts
             level: 'danger',
             url: AiVisibilityPlugin::pageUrl(Health::class),
             urlLabel: 'Open engine health',
+            type: 'engine_paused',
+            payload: ['engine' => $event->engine, 'reason' => $event->reason->value],
         )));
     }
 
@@ -42,6 +44,8 @@ class SendEngineAlerts
             title: "{$label} resumed",
             body: "{$label} is working again. Tracking on this engine continues with the next run.",
             level: 'success',
+            type: 'engine_resumed',
+            payload: ['engine' => $event->engine],
         )));
     }
 

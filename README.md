@@ -2,7 +2,7 @@
 
 Track how your brand shows up in answers from ChatGPT, Claude, Gemini, Perplexity and Grok — with competitor intelligence, inside your own Filament panel. Bring your own API keys; one key is enough to start.
 
-> **Status: in development (Milestone 6 of 8).** Setup, engines, brands, prompts, keywords, settings, health monitoring, tracking runs, reports, competitor intelligence, answer analysis, competitor reports and **keyword-grounded prompt generation with topics** work. Alert rules and scheduled reports land next. See [`docs/SPEC.md`](docs/SPEC.md) for the full plan.
+> **Status: in development (Milestone 7 of 8).** Everything except economy (batch) mode and Google AI Overviews / AI Mode tracking works, including **alert rules and scheduled reports**. See [`docs/SPEC.md`](docs/SPEC.md) for the full plan.
 
 ## Requirements
 
@@ -150,6 +150,28 @@ The **Discovered** screen lists them by score. **Track** turns a candidate into 
 
 The setup wizard can **Suggest competitors** for a new brand, and **Settings → AI instructions** lets you replace the instructions used for classification, name extraction and suggestions.
 
+## Alerts
+
+**Always on** (can't be switched off): an engine pauses or resumes, a keyword source fails, a brand hits its budget, the queue worker stops (checked every 10 minutes), or the scheduler stops (checked whenever someone opens an AI Visibility screen, since a stopped scheduler can't report itself).
+
+**Alert rules** (Alert rules screen), per brand or for all brands:
+
+| Rule | Fires when |
+|---|---|
+| Visibility drops | Visibility over the last N days falls by X points vs the N days before (optionally for one engine) |
+| A competitor overtakes you | A competitor is mentioned in more answers than you |
+| New direct competitor found | Discovery classifies a candidate as a direct competitor |
+| A prompt stops mentioning you | You were in the last few answers to a prompt on an engine, then not the latest |
+| Negative mentions increase | The share of negative mentions passes X% (needs at least 5 analysed mentions) |
+| Spend reaches part of the budget | This month's spend passes X% of the budget (once a month) |
+| A run fails | A run fails, or X% of its answers fail or are skipped |
+
+Rules are checked after every run and daily. Each rule fires once per episode (the same finding is never repeated) and respects its cooldown. Each rule chooses its channels (panel, email, Slack); recipients are set in Settings. Every alert, rule-based or always-on, is kept in the **Alerts** inbox, with an unread count in the navigation.
+
+## Scheduled reports
+
+**Scheduled reports** sends a weekly (Mondays, last 7 days) or monthly (1st, last 30 days) email per brand to any recipients, with the sections you choose: summary with period-over-period change, competitor leaderboard, opportunities and where to get featured, prompt movers, top sources, and how AI talks about you. Install `dompdf/dompdf` to attach a PDF copy. Reports can be previewed and sent on demand, and failures are recorded, alerted, and retried.
+
 ## One key is enough
 
 Every feature works with a single API key. Helper features (analysis, competitor classification, prompt generation) use the first engine with a working key, in the order OpenAI → Anthropic → Gemini → Grok → Perplexity, and switch automatically if that engine pauses. You can pin a specific engine and model in **Settings → AI helpers**.
@@ -217,6 +239,8 @@ AiVisibilityPlugin::make()
 | `ai-visibility:probe` | Re-test paused engines and resume those that work (runs every 5 minutes) |
 | `ai-visibility:discover {--brand=ID} {--queue}` | Find, score and classify competitors (runs after every run, and daily) |
 | `ai-visibility:sync-keywords {--brand=ID} {--all}` | Pull keywords from connected sources (due ones run daily) |
+| `ai-visibility:alerts {--watch}` | Check alert rules (daily) or just the queue watchdog (every 10 minutes) |
+| `ai-visibility:send-reports` | Send scheduled reports that are due (hourly) |
 
 ## Costs
 

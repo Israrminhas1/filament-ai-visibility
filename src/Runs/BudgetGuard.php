@@ -59,6 +59,8 @@ class BudgetGuard
                 title: "{$brand->name} paused: budget reached",
                 body: sprintf('The monthly budget of $%s for %s is used up. Tracking resumes next month, or raise the brand\'s budget.', number_format($brandBudget, 2), $brand->name),
                 level: 'danger',
+                type: 'brand_budget',
+                brandId: $brand->getKey(),
             ));
         }
     }

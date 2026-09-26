@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased — Milestone 7 (alerts and scheduled reports)
+
+- Alert rules: visibility drop, competitor overtakes, new direct competitor, prompt lost, negative sentiment, budget threshold, run failed. Per-rule channels and cooldown; one alert per episode.
+- Alerts inbox with unread badge; every alert (including always-on ones) is recorded.
+- Always-on stall alerts for a stopped queue worker (watchdog every 10 minutes) and a stopped scheduler (checked from the panel).
+- Scheduled weekly/monthly email reports with selectable sections, preview, send now, optional PDF (dompdf), failure alerts and retries.
+
 ## Unreleased — Milestone 6 (keywords, generation, topics)
 
 - Keyword sources: SerpAPI "People also ask", Google Search Console (service account) and DataForSEO, with tests, scheduled syncs, keyword limits, failure states and one-time alerts. Custom sources via `->keywordSource()`.

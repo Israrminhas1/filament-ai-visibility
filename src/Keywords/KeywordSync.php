@@ -120,6 +120,8 @@ class KeywordSync
                 level: 'danger',
                 url: AiVisibilityPlugin::pageUrl(ConnectionResource::class),
                 urlLabel: 'Open keyword sources',
+                type: 'connection_failed',
+                brandId: $connection->brand_id,
             ));
         }
     }

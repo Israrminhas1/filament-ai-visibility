@@ -5,6 +5,7 @@ namespace IsrarMinhas\FilamentAiVisibility\Http\Middleware;
 use Closure;
 use Illuminate\Http\Request;
 use IsrarMinhas\FilamentAiVisibility\AiVisibilityPlugin;
+use IsrarMinhas\FilamentAiVisibility\Alerts\StallWatcher;
 use IsrarMinhas\FilamentAiVisibility\Filament\Pages\Health;
 use IsrarMinhas\FilamentAiVisibility\Filament\Pages\Setup;
 use IsrarMinhas\FilamentAiVisibility\Support\Settings;
@@ -23,6 +24,9 @@ class RedirectToSetup
         if (! preg_match('/\.ai-visibility(\.|$)/', $route) || ! $request->isMethod('GET')) {
             return $next($request);
         }
+
+        // A stopped scheduler cannot report itself, so check when someone looks.
+        rescue(fn () => app(StallWatcher::class)->checkScheduler(), report: false);
 
         $plugin = AiVisibilityPlugin::current();
 

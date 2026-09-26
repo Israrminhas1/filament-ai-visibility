@@ -1,0 +1,71 @@
+<?php
+
+use Illuminate\Database\Migrations\Migration;
+use Illuminate\Database\Schema\Blueprint;
+use Illuminate\Support\Facades\Schema;
+
+return new class extends Migration
+{
+    protected function table(string $name): string
+    {
+        return config('ai-visibility.table_prefix', 'ai_visibility_') . $name;
+    }
+
+    public function up(): void
+    {
+        Schema::create($this->table('alert_rules'), function (Blueprint $table) {
+            $table->id();
+            $table->string('tenant_id')->nullable()->index();
+            $table->unsignedBigInteger('brand_id')->nullable()->index();
+            $table->string('type');
+            $table->string('name')->nullable();
+            $table->json('config')->nullable();
+            $table->json('channels')->nullable();
+            $table->unsignedSmallInteger('cooldown_hours')->default(24);
+            $table->boolean('is_active')->default(true);
+            $table->string('last_fingerprint')->nullable();
+            $table->timestamp('last_triggered_at')->nullable();
+            $table->timestamps();
+        });
+
+        Schema::create($this->table('alert_events'), function (Blueprint $table) {
+            $table->id();
+            $table->string('tenant_id')->nullable()->index();
+            $table->unsignedBigInteger('alert_rule_id')->nullable()->index();
+            $table->unsignedBigInteger('brand_id')->nullable()->index();
+            $table->string('type');
+            $table->string('level')->default('warning');
+            $table->string('title');
+            $table->text('body')->nullable();
+            $table->string('url')->nullable();
+            $table->json('payload')->nullable();
+            $table->timestamp('read_at')->nullable();
+            $table->timestamps();
+
+            $table->index(['tenant_id', 'read_at']);
+        });
+
+        Schema::create($this->table('report_schedules'), function (Blueprint $table) {
+            $table->id();
+            $table->string('tenant_id')->nullable()->index();
+            $table->foreignId('brand_id')->constrained($this->table('brands'))->cascadeOnDelete();
+            $table->string('name');
+            $table->string('frequency')->default('weekly');
+            $table->json('recipients');
+            $table->boolean('attach_pdf')->default(false);
+            $table->json('sections')->nullable();
+            $table->boolean('is_active')->default(true);
+            $table->timestamp('next_send_at')->nullable()->index();
+            $table->timestamp('last_sent_at')->nullable();
+            $table->text('last_error')->nullable();
+            $table->timestamps();
+        });
+    }
+
+    public function down(): void
+    {
+        foreach (['report_schedules', 'alert_events', 'alert_rules'] as $table) {
+            Schema::dropIfExists($this->table($table));
+        }
+    }
+};

@@ -6,7 +6,9 @@ use Illuminate\Console\Scheduling\Schedule;
 use Illuminate\Queue\Events\JobProcessing;
 use Illuminate\Support\Facades\Event;
 use Livewire\Livewire;
+use IsrarMinhas\FilamentAiVisibility\Commands\AlertsCommand;
 use IsrarMinhas\FilamentAiVisibility\Commands\DiscoverCommand;
+use IsrarMinhas\FilamentAiVisibility\Commands\SendReportsCommand;
 use IsrarMinhas\FilamentAiVisibility\Commands\EnginesCommand;
 use IsrarMinhas\FilamentAiVisibility\Commands\HealthCommand;
 use IsrarMinhas\FilamentAiVisibility\Commands\InstallCommand;
@@ -25,6 +27,7 @@ use IsrarMinhas\FilamentAiVisibility\Events\EnginePaused;
 use IsrarMinhas\FilamentAiVisibility\Events\EngineResumed;
 use IsrarMinhas\FilamentAiVisibility\Events\RunCompleted;
 use IsrarMinhas\FilamentAiVisibility\Jobs\DiscoverCompetitorsJob;
+use IsrarMinhas\FilamentAiVisibility\Jobs\EvaluateAlertsJob;
 use IsrarMinhas\FilamentAiVisibility\Support\Tenancy;
 use IsrarMinhas\FilamentAiVisibility\Jobs\QueueHeartbeat;
 use IsrarMinhas\FilamentAiVisibility\Keywords\KeywordSourceRegistry;
@@ -66,6 +69,7 @@ class AiVisibilityServiceProvider extends PackageServiceProvider
                 'create_ai_visibility_competitor_tables',
                 'add_ai_visibility_analysis_columns',
                 'create_ai_visibility_connections_table',
+                'create_ai_visibility_automation_tables',
             ])
             ->hasCommands([
                 InstallCommand::class,
@@ -75,6 +79,8 @@ class AiVisibilityServiceProvider extends PackageServiceProvider
                 ProbeCommand::class,
                 DiscoverCommand::class,
                 SyncKeywordsCommand::class,
+                AlertsCommand::class,
+                SendReportsCommand::class,
             ]);
     }
 
@@ -150,6 +156,9 @@ class AiVisibilityServiceProvider extends PackageServiceProvider
             if ($event->run->results_done > 0 && $wanted) {
                 DiscoverCompetitorsJob::dispatch($event->run->brand_id, $event->run->tenant_id, $event->run->getKey());
             }
+
+            // Check alert rules against the new answers.
+            EvaluateAlertsJob::dispatch($event->run->brand_id, $event->run->tenant_id, $event->run->getKey());
         });
 
         Event::listen(EnginePaused::class, [SendEngineAlerts::class, 'handlePaused']);
@@ -179,6 +188,20 @@ class AiVisibilityServiceProvider extends PackageServiceProvider
             $schedule->command('ai-visibility:sync-keywords')
                 ->dailyAt('05:00')
                 ->name('ai-visibility:sync-keywords');
+
+            // Alert rules daily; the queue watchdog every 10 minutes; reports when due.
+            $schedule->command('ai-visibility:alerts')
+                ->dailyAt('07:00')
+                ->name('ai-visibility:alerts');
+
+            $schedule->command('ai-visibility:alerts --watch')
+                ->everyTenMinutes()
+                ->name('ai-visibility:watch');
+
+            $schedule->command('ai-visibility:send-reports')
+                ->hourly()
+                ->withoutOverlapping()
+                ->name('ai-visibility:send-reports');
 
             $schedule->command('ai-visibility:probe')
                 ->everyFiveMinutes()

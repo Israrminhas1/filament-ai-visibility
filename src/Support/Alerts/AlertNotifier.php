@@ -7,6 +7,7 @@ use Filament\Notifications\Notification;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Mail;
+use IsrarMinhas\FilamentAiVisibility\Models\AlertEvent;
 use IsrarMinhas\FilamentAiVisibility\Support\Settings;
 use Throwable;
 
@@ -20,11 +21,36 @@ class AlertNotifier
         protected Settings $settings,
     ) {}
 
-    public function send(Alert $alert): void
+    /**
+     * @param  array<string>|null  $channels  "database", "mail", "slack"; null uses every configured channel.
+     */
+    public function send(Alert $alert, ?array $channels = null): void
     {
-        $this->toDatabase($alert);
-        $this->toMail($alert);
-        $this->toSlack($alert);
+        // Every alert is kept in the inbox, whatever the channels.
+        rescue(fn () => AlertEvent::query()->create([
+            'alert_rule_id' => $alert->ruleId,
+            'brand_id' => $alert->brandId,
+            'type' => $alert->type,
+            'level' => $alert->level,
+            'title' => mb_substr($alert->title, 0, 255),
+            'body' => $alert->body,
+            'url' => $alert->url ? mb_substr($alert->url, 0, 255) : null,
+            'payload' => $alert->payload ?: null,
+        ]), report: false);
+
+        $channels ??= ['database', 'mail', 'slack'];
+
+        if (in_array('database', $channels, true)) {
+            $this->toDatabase($alert);
+        }
+
+        if (in_array('mail', $channels, true)) {
+            $this->toMail($alert);
+        }
+
+        if (in_array('slack', $channels, true)) {
+            $this->toSlack($alert);
+        }
     }
 
     protected function toDatabase(Alert $alert): void

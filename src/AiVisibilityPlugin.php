@@ -18,7 +18,10 @@ use IsrarMinhas\FilamentAiVisibility\Filament\Pages\TopicsReport;
 use IsrarMinhas\FilamentAiVisibility\Keywords\Contracts\KeywordSource;
 use IsrarMinhas\FilamentAiVisibility\Keywords\KeywordSourceRegistry;
 use IsrarMinhas\FilamentAiVisibility\Filament\Pages\Setup;
+use IsrarMinhas\FilamentAiVisibility\Filament\Resources\AlertEventResource;
+use IsrarMinhas\FilamentAiVisibility\Filament\Resources\AlertRuleResource;
 use IsrarMinhas\FilamentAiVisibility\Filament\Resources\BrandResource;
+use IsrarMinhas\FilamentAiVisibility\Filament\Resources\ReportScheduleResource;
 use IsrarMinhas\FilamentAiVisibility\Filament\Resources\CandidateResource;
 use IsrarMinhas\FilamentAiVisibility\Filament\Resources\ConnectionResource;
 use IsrarMinhas\FilamentAiVisibility\Filament\Resources\KeywordResource;
@@ -52,6 +55,8 @@ class AiVisibilityPlugin implements Plugin
         'runs' => true,
         'answers' => true,
         'settings' => true,
+        'alerts' => true,
+        'scheduledReports' => true,
         'health' => true,
     ];
 
@@ -197,6 +202,16 @@ class AiVisibilityPlugin implements Plugin
         return $this->screen('answers', $condition);
     }
 
+    public function alerts(bool $condition = true): static
+    {
+        return $this->screen('alerts', $condition);
+    }
+
+    public function scheduledReports(bool $condition = true): static
+    {
+        return $this->screen('scheduledReports', $condition);
+    }
+
     public function settingsPage(bool $condition = true): static
     {
         return $this->screen('settings', $condition);
@@ -256,6 +271,9 @@ class AiVisibilityPlugin implements Plugin
             PromptResource::class => $this->screens['prompts'],
             KeywordResource::class => $this->screens['keywords'],
             ConnectionResource::class => $this->screens['keywordSources'],
+            AlertEventResource::class => $this->screens['alerts'],
+            AlertRuleResource::class => $this->screens['alerts'],
+            ReportScheduleResource::class => $this->screens['scheduledReports'],
             RunResource::class => $this->screens['runs'],
             ResultResource::class => $this->screens['answers'],
         ]));

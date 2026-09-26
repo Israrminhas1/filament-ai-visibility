@@ -101,6 +101,7 @@ abstract class TestCase extends Orchestra
         (include __DIR__ . '/../database/migrations/create_ai_visibility_competitor_tables.php.stub')->up();
         (include __DIR__ . '/../database/migrations/add_ai_visibility_analysis_columns.php.stub')->up();
         (include __DIR__ . '/../database/migrations/create_ai_visibility_connections_table.php.stub')->up();
+        (include __DIR__ . '/../database/migrations/create_ai_visibility_automation_tables.php.stub')->up();
     }
 
     public function createUser(array $attributes = []): User
