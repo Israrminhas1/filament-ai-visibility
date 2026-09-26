@@ -2,6 +2,7 @@
 
 namespace IsrarMinhas\FilamentAiVisibility\Support\Health;
 
+use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Facades\Schema;
 use IsrarMinhas\FilamentAiVisibility\Jobs\QueueHeartbeat;
 use IsrarMinhas\FilamentAiVisibility\Models\Heartbeat;
@@ -15,14 +16,42 @@ class SystemHealth
 {
     public const SCHEDULER = 'scheduler';
 
-    public static function queueHeartbeatName(): string
+    /**
+     * What each queue key is for, shown when the plugin uses more than one queue.
+     */
+    protected const QUEUE_PURPOSES = [
+        'tracking' => 'answering prompts',
+        'analysis' => 'alerts',
+        'classification' => 'competitor discovery and re-checks',
+    ];
+
+    public static function queueHeartbeatName(?string $queue = null): string
     {
-        return 'queue:' . static::queueName();
+        return 'queue:' . ($queue ?? static::queueName());
     }
 
+    /**
+     * The tracking queue, where most of the work happens.
+     */
     public static function queueName(): string
     {
-        return config('ai-visibility.queues.tracking', 'default');
+        return config('ai-visibility.queues.tracking') ?: 'default';
+    }
+
+    /**
+     * Every distinct queue the plugin sends jobs to, each needing a worker.
+     *
+     * @return array<string, array<string>> Queue name → what it is used for.
+     */
+    public static function queues(): array
+    {
+        $queues = [];
+
+        foreach (self::QUEUE_PURPOSES as $key => $purpose) {
+            $queues[config("ai-visibility.queues.{$key}") ?: 'default'][] = $purpose;
+        }
+
+        return $queues;
     }
 
     public static function queueConnection(): string
@@ -38,9 +67,19 @@ class SystemHealth
         return [
             $this->migrations(),
             $this->queueDriver(),
-            $this->queueWorker(),
+            ...$this->queueWorkers(),
             $this->scheduler(),
         ];
+    }
+
+    /**
+     * One worker check per queue the plugin uses.
+     *
+     * @return array<CheckResult>
+     */
+    public function queueWorkers(): array
+    {
+        return array_map(fn (string $queue) => $this->queueWorker($queue), array_keys(static::queues()));
     }
 
     public function hasBlockingFailures(): bool
@@ -80,24 +119,42 @@ class SystemHealth
         );
     }
 
-    public function queueWorker(): CheckResult
+    public function queueWorker(?string $queue = null): CheckResult
     {
-        $lastBeat = Heartbeat::lastBeat(static::queueHeartbeatName());
+        $queue ??= static::queueName();
+        $queues = static::queues();
+        $several = count($queues) > 1;
+
+        // With one queue the check keeps its simple name; with several, each says what it is for.
+        $key = $several ? "queue_worker:{$queue}" : 'queue_worker';
+        $label = $several ? "Queue worker: \"{$queue}\" (" . implode(', ', $queues[$queue] ?? []) . ')' : 'Queue worker';
+
+        $lastBeat = Heartbeat::lastBeat(static::queueHeartbeatName($queue));
         $warning = (int) config('ai-visibility.health.queue_warning_after', 15);
         $critical = (int) config('ai-visibility.health.queue_critical_after', 60);
-        $fix = 'Start a worker for the "' . static::queueName() . '" queue and keep it running (e.g. with Supervisor): php artisan queue:work --queue=' . static::queueName();
+        $fix = "Start a worker for the \"{$queue}\" queue and keep it running (e.g. with Supervisor): php artisan queue:work --queue={$queue} --timeout=930";
+        $waiting = $this->waiting($queue);
+        $backlog = $waiting > 0 ? " {$waiting} jobs waiting." : '';
 
         if (! $lastBeat) {
-            return new CheckResult('queue_worker', 'Queue worker', CheckResult::FAILED, 'No queue worker has processed an AI Visibility job yet.', $fix, blocking: true);
+            return new CheckResult($key, $label, CheckResult::FAILED, 'No queue worker has processed an AI Visibility job on this queue yet.' . $backlog, $fix, blocking: true);
         }
 
         $minutes = (int) $lastBeat->diffInMinutes(now(), absolute: true);
 
         return match (true) {
-            $minutes >= $critical => new CheckResult('queue_worker', 'Queue worker', CheckResult::FAILED, "The last queued job was processed {$lastBeat->diffForHumans()}.", $fix, blocking: true),
-            $minutes >= $warning => new CheckResult('queue_worker', 'Queue worker', CheckResult::WARNING, "The last queued job was processed {$lastBeat->diffForHumans()}.", $fix),
-            default => new CheckResult('queue_worker', 'Queue worker', CheckResult::OK, "Worker is processing jobs (last heartbeat {$lastBeat->diffForHumans()})."),
+            $minutes >= $critical => new CheckResult($key, $label, CheckResult::FAILED, "The last queued job was processed {$lastBeat->diffForHumans()}.{$backlog}", $fix, blocking: true),
+            $minutes >= $warning => new CheckResult($key, $label, CheckResult::WARNING, "The last queued job was processed {$lastBeat->diffForHumans()}.{$backlog}", $fix),
+            default => new CheckResult($key, $label, CheckResult::OK, "Worker is processing jobs (last heartbeat {$lastBeat->diffForHumans()}).{$backlog}"),
         };
+    }
+
+    /**
+     * Jobs waiting on a queue, where the driver can tell (database, redis, SQS).
+     */
+    public function waiting(string $queue): int
+    {
+        return (int) rescue(fn () => Queue::connection(static::queueConnection())->size($queue), 0, report: false);
     }
 
     public function scheduler(): CheckResult
@@ -125,10 +182,12 @@ class SystemHealth
      */
     public function pingQueue(): void
     {
-        try {
-            QueueHeartbeat::dispatch();
-        } catch (Throwable) {
-            //
+        foreach (array_keys(static::queues()) as $queue) {
+            try {
+                QueueHeartbeat::dispatch($queue);
+            } catch (Throwable) {
+                //
+            }
         }
     }
 }

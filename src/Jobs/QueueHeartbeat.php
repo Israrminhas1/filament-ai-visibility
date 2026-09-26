@@ -10,7 +10,8 @@ use IsrarMinhas\FilamentAiVisibility\Models\Heartbeat;
 use IsrarMinhas\FilamentAiVisibility\Support\Health\SystemHealth;
 
 /**
- * Proves a worker is processing the AI Visibility queue.
+ * Proves a worker is processing one of the AI Visibility queues. One is
+ * sent to each queue the plugin uses.
  */
 class QueueHeartbeat implements ShouldQueue
 {
@@ -20,14 +21,18 @@ class QueueHeartbeat implements ShouldQueue
 
     public int $tries = 1;
 
-    public function __construct()
+    public readonly string $queueName;
+
+    public function __construct(?string $queue = null)
     {
+        $this->queueName = $queue ?? SystemHealth::queueName();
+
         $this->onConnection(SystemHealth::queueConnection());
-        $this->onQueue(SystemHealth::queueName());
+        $this->onQueue($this->queueName);
     }
 
     public function handle(): void
     {
-        Heartbeat::beat(SystemHealth::queueHeartbeatName());
+        Heartbeat::beat(SystemHealth::queueHeartbeatName($this->queueName));
     }
 }

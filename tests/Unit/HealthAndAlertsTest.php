@@ -1,6 +1,11 @@
 <?php
 
 use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Queue;
+use IsrarMinhas\FilamentAiVisibility\Jobs\DiscoverCompetitorsJob;
+use IsrarMinhas\FilamentAiVisibility\Jobs\EvaluateAlertsJob;
+use IsrarMinhas\FilamentAiVisibility\Jobs\RedetectBrandJob;
+use IsrarMinhas\FilamentAiVisibility\Jobs\RunResultJob;
 use IsrarMinhas\FilamentAiVisibility\Engines\EngineManager;
 use IsrarMinhas\FilamentAiVisibility\Enums\PauseReason;
 use IsrarMinhas\FilamentAiVisibility\Jobs\QueueHeartbeat;
@@ -40,7 +45,50 @@ describe('health', function () {
     it('registers the heartbeat schedule', function () {
         $events = collect(app(\Illuminate\Console\Scheduling\Schedule::class)->events())->map->description;
 
-        expect($events)->toContain('ai-visibility:scheduler-heartbeat', 'ai-visibility:queue-heartbeat');
+        expect($events)->toContain('ai-visibility:scheduler-heartbeat', 'ai-visibility:queue-heartbeat:default');
+    });
+
+    it('checks every queue separately when the plugin uses several', function () {
+        config([
+            'ai-visibility.queues.tracking' => 'aiv-tracking',
+            'ai-visibility.queues.analysis' => 'aiv-background',
+            'ai-visibility.queues.classification' => 'aiv-background',
+        ]);
+        Heartbeat::beat(SystemHealth::SCHEDULER);
+
+        expect(SystemHealth::queues())->toBe([
+            'aiv-tracking' => ['answering prompts'],
+            'aiv-background' => ['alerts', 'competitor discovery and re-checks'],
+        ]);
+
+        // Only the tracking queue has a worker.
+        (new QueueHeartbeat('aiv-tracking'))->handle();
+        $checks = collect(app(SystemHealth::class)->queueWorkers())->keyBy('key');
+
+        expect($checks['queue_worker:aiv-tracking']->ok())->toBeTrue()
+            ->and($checks['queue_worker:aiv-background']->status)->toBe(CheckResult::FAILED)
+            ->and($checks['queue_worker:aiv-background']->label)->toContain('competitor discovery')
+            ->and($checks['queue_worker:aiv-background']->fix)->toContain('--queue=aiv-background')
+            ->and(app(SystemHealth::class)->hasBlockingFailures())->toBeTrue();
+
+        // Heartbeats go to each queue.
+        Queue::fake();
+        app(SystemHealth::class)->pingQueue();
+        Queue::assertPushedOn('aiv-tracking', QueueHeartbeat::class);
+        Queue::assertPushedOn('aiv-background', QueueHeartbeat::class);
+    });
+
+    it('sends each job to the queue for its purpose', function () {
+        config([
+            'ai-visibility.queues.tracking' => 'aiv-tracking',
+            'ai-visibility.queues.analysis' => 'aiv-alerts',
+            'ai-visibility.queues.classification' => 'aiv-discovery',
+        ]);
+
+        expect((new RunResultJob(1, 'openai', null))->queue)->toBe('aiv-tracking')
+            ->and((new EvaluateAlertsJob(1, null))->queue)->toBe('aiv-alerts')
+            ->and((new DiscoverCompetitorsJob(1, null))->queue)->toBe('aiv-discovery')
+            ->and((new RedetectBrandJob(1, null))->queue)->toBe('aiv-discovery');
     });
 
     it('reports through the health command', function () {

@@ -180,9 +180,12 @@ class AiVisibilityServiceProvider extends PackageServiceProvider
                 ->everyMinute()
                 ->name('ai-visibility:scheduler-heartbeat');
 
-            $schedule->job(new QueueHeartbeat)
-                ->everyFiveMinutes()
-                ->name('ai-visibility:queue-heartbeat');
+            // One heartbeat per queue, so a queue without a worker is noticed.
+            foreach (array_keys(SystemHealth::queues()) as $queue) {
+                $schedule->job(new QueueHeartbeat($queue))
+                    ->everyFiveMinutes()
+                    ->name("ai-visibility:queue-heartbeat:{$queue}");
+            }
 
             // Start due runs, and bring paused engines back when they work again.
             $schedule->command('ai-visibility:run --due')

@@ -31,11 +31,28 @@ class StallWatcher
     ) {}
 
     /**
-     * Called by the scheduler: warns every tenant when the queue worker has stopped.
+     * Called by the scheduler: warns every tenant when a queue the plugin
+     * uses has no working worker.
+     *
+     * @return bool Whether any queue has stopped.
      */
     public function checkQueue(): bool
     {
-        $last = Heartbeat::lastBeat(SystemHealth::queueHeartbeatName());
+        $stopped = false;
+
+        foreach (SystemHealth::queues() as $queue => $purposes) {
+            $stopped = $this->checkOneQueue($queue, $purposes) || $stopped;
+        }
+
+        return $stopped;
+    }
+
+    /**
+     * @param  array<string>  $purposes
+     */
+    protected function checkOneQueue(string $queue, array $purposes): bool
+    {
+        $last = Heartbeat::lastBeat(SystemHealth::queueHeartbeatName($queue));
         $critical = (int) config('ai-visibility.health.queue_critical_after', 60);
 
         if ($last && $last->gt(now()->subMinutes($critical))) {
@@ -47,7 +64,14 @@ class StallWatcher
             return false;
         }
 
-        $this->alertAll('queue', 'The AI Visibility queue worker has stopped', ($last ? 'No queued job has been processed since ' . $last->diffForHumans() . '.' : 'No queued job has ever been processed.') . ' Runs, analysis and discovery are waiting. Restart your queue worker (php artisan queue:work).');
+        $several = count(SystemHealth::queues()) > 1;
+
+        $this->alertAll(
+            $several ? "queue:{$queue}" : 'queue',
+            $several ? "The AI Visibility \"{$queue}\" queue has stopped" : 'The AI Visibility queue worker has stopped',
+            ($last ? 'No queued job has been processed since ' . $last->diffForHumans() . '.' : 'No queued job has ever been processed.')
+                . ' Waiting: ' . implode(', ', $purposes) . ". Restart the worker: php artisan queue:work --queue={$queue} --timeout=930",
+        );
 
         return true;
     }

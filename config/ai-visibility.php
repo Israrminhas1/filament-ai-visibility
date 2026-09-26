@@ -40,12 +40,23 @@ return [
     |--------------------------------------------------------------------------
     | Queues
     |--------------------------------------------------------------------------
+    |
+    | Out of the box everything runs on your app's default queue, so a single
+    | `php artisan queue:work` is enough. For real volumes, give tracking its
+    | own queue and several worker processes: each answer waits 10–60 seconds
+    | on a web search, so one worker handles only a few answers a minute.
+    | See docs/queues-and-scheduler.md.
+    |
     */
     'queues' => [
+        // Queue connection (null = your app's default).
         'connection' => env('AI_VISIBILITY_QUEUE_CONNECTION'),
-        'tracking' => env('AI_VISIBILITY_QUEUE', 'default'),
-        'analysis' => env('AI_VISIBILITY_QUEUE', 'default'),
-        'classification' => env('AI_VISIBILITY_QUEUE', 'default'),
+        // Answering prompts, and economy-mode batch submissions: high volume, slow calls.
+        'tracking' => env('AI_VISIBILITY_QUEUE_TRACKING', env('AI_VISIBILITY_QUEUE', 'default')),
+        // Alert rules after each run: short jobs.
+        'analysis' => env('AI_VISIBILITY_QUEUE_ANALYSIS', env('AI_VISIBILITY_QUEUE', 'default')),
+        // Competitor discovery and classification, re-checking past answers: long jobs.
+        'classification' => env('AI_VISIBILITY_QUEUE_CLASSIFICATION', env('AI_VISIBILITY_QUEUE', 'default')),
     ],
 
     /*
