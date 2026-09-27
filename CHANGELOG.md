@@ -1,5 +1,10 @@
 # Changelog
 
+## v1.0.1 — 2026-09-27
+
+- Fixed: the setup wizard's Prompts step failed on Laravel 11 and 12 (it used a query method that only exists in Laravel 13).
+- Laravel 11 is now part of the automated test matrix.
+
 ## v1.0.0 — 2026-09-27
 
 First stable release.
