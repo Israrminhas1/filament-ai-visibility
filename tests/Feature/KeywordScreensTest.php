@@ -60,6 +60,27 @@ describe('keyword sources screen', function () {
         $this->get(ConnectionResource::getUrl())->assertOk()->assertSee('People also ask')->assertDontSee('serp-key');
     });
 
+    it('shows a failed test on the status, and clears it once a test passes', function () {
+        Http::fake(['serpapi.com/account.json*' => Http::sequence()
+            ->push(['error' => 'Your account has run out of searches.'], 429)
+            ->push(['total_searches_left' => 95])]);
+
+        livewire(ManageConnections::class)
+            ->callAction('create', ['brand_id' => $this->brand->id, 'type' => 'serpapi', 'name' => 'PAA', 'credentials' => ['api_key' => 'serp-key']])
+            ->assertNotified('Saved, but the test failed');
+
+        $connection = Connection::query()->first();
+
+        expect($connection->status)->toBe(Connection::ERROR)
+            ->and($connection->last_error)->toContain('run out of searches');
+
+        livewire(ManageConnections::class)->callAction(TestAction::make('test')->table($connection));
+
+        expect($connection->fresh())
+            ->status->toBe(Connection::CONNECTED)
+            ->last_error->toBeNull();
+    });
+
     it('keeps saved secrets when they are left empty on edit', function () {
         $connection = Connection::query()->create(['brand_id' => $this->brand->id, 'type' => 'serpapi', 'name' => 'PAA', 'credentials' => ['api_key' => 'keep-me']]);
 
@@ -82,7 +103,7 @@ describe('keyword sources screen', function () {
 
         livewire(ManageConnections::class)
             ->callAction(TestAction::make('sync')->table($connection))
-            ->assertNotified('1 new keywords, 0 updated');
+            ->assertNotified('1 new keyword, 0 updated');
     });
 });
 

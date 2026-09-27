@@ -1,5 +1,14 @@
 # Changelog
 
+## v1.1.1 — 2026-09-27
+
+Fixes from an end-to-end run on two real brands with all seven engines.
+
+- Keyword sources: a failed test is now kept on the source's status. Before, connecting a source whose test failed still showed "Connected" in the list, and **Test** never updated the status (in either direction).
+- Keyword sources (Search Console, SerpAPI, DataForSEO) retry requests that fail to connect, like the engines do. A single TLS timeout to Google no longer fails a sync or a test.
+- The Run now confirmation now names every reason a run cannot start (budget, no usable engines, no active prompts, daily limit, setup), not only some of them.
+- "1 new keywords" is now "1 new keyword".
+
 ## v1.1.0 — 2026-09-27
 
 More fixes from the end-to-end run, now with OpenAI and Claude, and economy mode is removed.

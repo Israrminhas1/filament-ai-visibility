@@ -140,11 +140,7 @@ class ConnectionResource extends Resource
                         ->label('Test')
                         ->icon('heroicon-o-bolt')
                         ->authorize(fn () => static::canManageSources())
-                        ->action(function (Connection $record) {
-                            $result = app(KeywordSourceRegistry::class)->get($record->type)->test($record);
-
-                            Notification::make()->title($result->message)->status($result->ok ? 'success' : 'danger')->send();
-                        }),
+                        ->action(fn (Connection $record) => static::testConnection($record)),
                     EditAction::make()
                         ->authorize(fn (Connection $record) => static::canEdit($record))
                         ->fillForm(fn (Connection $record) => static::fillData($record))
@@ -221,23 +217,38 @@ class ConnectionResource extends Resource
         $record = static::save($data, $record);
 
         if ($record->credentials !== $before && app(KeywordSourceRegistry::class)->has($record->type)) {
-            $result = app(KeywordSourceRegistry::class)->get($record->type)->test($record);
-
-            if (! $result->ok) {
-                $record->forceFill([
-                    'status' => $result->credentialsRejected ? Connection::NEEDS_REAUTH : Connection::ERROR,
-                    'last_error' => SourceFailed::redact($result->message),
-                ])->save();
-            }
-
-            Notification::make()
-                ->title($result->ok ? 'Saved and connected' : 'Saved, but the test failed')
-                ->body($result->message)
-                ->status($result->ok ? 'success' : 'warning')
-                ->send();
+            static::testConnection($record, 'Saved and connected', 'Saved, but the test failed');
         }
 
         return $record;
+    }
+
+    /**
+     * Test a connection and keep the outcome on its status, so the list never says
+     * "Connected" after a failed test (or "Error" after a passing one).
+     */
+    public static function testConnection(Connection $record, ?string $okTitle = null, ?string $failedTitle = null): bool
+    {
+        $result = app(KeywordSourceRegistry::class)->get($record->type)->test($record);
+
+        if ($record->status !== Connection::DISABLED) {
+            $record->forceFill($result->ok
+                ? ['status' => Connection::CONNECTED, 'last_error' => null]
+                : [
+                    'status' => $result->credentialsRejected ? Connection::NEEDS_REAUTH : Connection::ERROR,
+                    'last_error' => SourceFailed::redact($result->message),
+                ])->save();
+        }
+
+        $title = $result->ok ? $okTitle : $failedTitle;
+
+        Notification::make()
+            ->title($title ?? $result->message)
+            ->body($title ? $result->message : null)
+            ->status($result->ok ? 'success' : 'warning')
+            ->send();
+
+        return $result->ok;
     }
 
     public static function sync(Connection $record): void
@@ -251,7 +262,7 @@ class ConnectionResource extends Resource
         }
 
         Notification::make()
-            ->title("{$counts['created']} new keywords, {$counts['updated']} updated")
+            ->title($counts['created'] . ' new ' . str('keyword')->plural($counts['created']) . ", {$counts['updated']} updated")
             ->body($counts['skipped'] ? "{$counts['skipped']} were not added because of the keyword limit." : null)
             ->status($counts['skipped'] ? 'warning' : 'success')
             ->send();

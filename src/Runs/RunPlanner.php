@@ -42,40 +42,7 @@ class RunPlanner
      */
     public function start(Brand $brand, RunTrigger $trigger = RunTrigger::Manual, ?array $promptIds = null, ?int $userId = null): Run
     {
-        $this->guard($brand, $trigger);
-
-        $engines = $this->engines->usable($brand);
-
-        if ($engines === []) {
-            $enabled = $this->engines->enabled($brand);
-
-            throw new RunNotStarted($enabled === []
-                ? 'No engines are enabled. Turn on at least one engine in Settings.'
-                : 'Every enabled engine is paused. See the Health page for how to fix it.');
-        }
-
-        $prompts = $brand->prompts()
-            ->when($promptIds !== null, fn ($query) => $query->whereKey($promptIds), fn ($query) => $query->where('status', PromptStatus::Active))
-            ->pluck('id');
-
-        if ($prompts->isEmpty()) {
-            throw new RunNotStarted("{$brand->name} has no active prompts to run.");
-        }
-
-        $samples = max(1, min(5, (int) $brand->setting('runs.samples', 1)));
-        $models = array_combine($engines, array_map(fn (string $engine) => $this->engines->model($engine, $brand), $engines));
-        $estimate = CostEstimator::costPerRun($prompts->count(), $engines, $samples, $models);
-
-        // What is left after this month's spending and the expected cost of runs still in progress.
-        $remaining = $this->spend->remaining($brand);
-
-        if ($remaining !== null && $estimate > $remaining && $this->settings->get('budget.stop_at_budget', true)) {
-            throw new RunNotStarted(sprintf(
-                'This run would cost about %s, but only %s of the monthly budget is left (after runs in progress).',
-                CostEstimator::format($estimate),
-                CostEstimator::format($remaining),
-            ));
-        }
+        ['engines' => $engines, 'prompts' => $prompts, 'samples' => $samples, 'estimate' => $estimate] = $this->plan($brand, $trigger, $promptIds);
 
         $run = DB::transaction(function () use ($brand, $trigger, $userId, $engines, $prompts, $samples, $estimate) {
             $run = Run::query()->create([
@@ -126,6 +93,55 @@ class RunPlanner
         RunStarted::dispatch($run);
 
         return $run;
+    }
+
+    /**
+     * Everything a run needs, checked before anything is created: the brand may
+     * run now, engines are usable, there are prompts, and the budget covers it.
+     *
+     * @param  array<int>|null  $promptIds
+     * @return array{engines: array<string>, prompts: \Illuminate\Support\Collection<int, int>, samples: int, estimate: float}
+     *
+     * @throws RunNotStarted
+     */
+    protected function plan(Brand $brand, RunTrigger $trigger, ?array $promptIds = null): array
+    {
+        $this->guard($brand, $trigger);
+
+        $engines = $this->engines->usable($brand);
+
+        if ($engines === []) {
+            $enabled = $this->engines->enabled($brand);
+
+            throw new RunNotStarted($enabled === []
+                ? 'No engines are enabled. Turn on at least one engine in Settings.'
+                : 'Every enabled engine is paused. See the Health page for how to fix it.');
+        }
+
+        $prompts = $brand->prompts()
+            ->when($promptIds !== null, fn ($query) => $query->whereKey($promptIds), fn ($query) => $query->where('status', PromptStatus::Active))
+            ->pluck('id');
+
+        if ($prompts->isEmpty()) {
+            throw new RunNotStarted("{$brand->name} has no active prompts to run.");
+        }
+
+        $samples = max(1, min(5, (int) $brand->setting('runs.samples', 1)));
+        $models = array_combine($engines, array_map(fn (string $engine) => $this->engines->model($engine, $brand), $engines));
+        $estimate = CostEstimator::costPerRun($prompts->count(), $engines, $samples, $models);
+
+        // What is left after this month's spending and the expected cost of runs still in progress.
+        $remaining = $this->spend->remaining($brand);
+
+        if ($remaining !== null && $estimate > $remaining && $this->settings->get('budget.stop_at_budget', true)) {
+            throw new RunNotStarted(sprintf(
+                'This run would cost about %s, but only %s of the monthly budget is left (after runs in progress).',
+                CostEstimator::format($estimate),
+                CostEstimator::format($remaining),
+            ));
+        }
+
+        return ['engines' => $engines, 'prompts' => $prompts, 'samples' => $samples, 'estimate' => $estimate];
     }
 
     /**
@@ -191,7 +207,7 @@ class RunPlanner
     public function blocker(Brand $brand, RunTrigger $trigger = RunTrigger::Manual): ?string
     {
         try {
-            $this->guard($brand, $trigger);
+            $this->plan($brand, $trigger);
         } catch (RunNotStarted $e) {
             return $e->getMessage();
         }

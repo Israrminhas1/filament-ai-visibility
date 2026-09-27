@@ -7,6 +7,7 @@ use Filament\Forms\Components\TextInput;
 use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Http\Client\Response;
 use Illuminate\Support\Facades\Http;
+use IsrarMinhas\FilamentAiVisibility\Engines\Drivers\HttpEngine;
 use IsrarMinhas\FilamentAiVisibility\Enums\KeywordSource as KeywordSourceEnum;
 use IsrarMinhas\FilamentAiVisibility\Keywords\Contracts\KeywordSource;
 use IsrarMinhas\FilamentAiVisibility\Keywords\KeywordData;
@@ -62,7 +63,7 @@ class SerpApiPeopleAlsoAsk implements KeywordSource
     public function test(Connection $connection): SourceTestResult
     {
         try {
-            $response = Http::timeout(20)->get('https://serpapi.com/account.json', ['api_key' => $connection->credential('api_key')]);
+            $response = Http::timeout(20)->retry(...HttpEngine::connectRetry())->get('https://serpapi.com/account.json', ['api_key' => $connection->credential('api_key')]);
         } catch (ConnectionException) {
             return SourceTestResult::failed('Could not reach SerpAPI.');
         }
@@ -134,7 +135,7 @@ class SerpApiPeopleAlsoAsk implements KeywordSource
     protected function search(Connection $connection, string $query, ?string $country): ?Response
     {
         try {
-            $response = Http::timeout(60)->get('https://serpapi.com/search.json', array_filter([
+            $response = Http::timeout(60)->retry(...HttpEngine::connectRetry())->get('https://serpapi.com/search.json', array_filter([
                 'engine' => 'google',
                 'q' => $query,
                 'gl' => $country ? strtolower($country) : null,

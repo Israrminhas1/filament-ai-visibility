@@ -6,6 +6,7 @@ use Filament\Forms\Components\TextInput;
 use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Http\Client\PendingRequest;
 use Illuminate\Support\Facades\Http;
+use IsrarMinhas\FilamentAiVisibility\Engines\Drivers\HttpEngine;
 use IsrarMinhas\FilamentAiVisibility\Keywords\Contracts\KeywordSource;
 use IsrarMinhas\FilamentAiVisibility\Keywords\KeywordData;
 use IsrarMinhas\FilamentAiVisibility\Keywords\SourceFailed;
@@ -131,6 +132,7 @@ class DataForSeoKeywords implements KeywordSource
     protected function http(Connection $connection): PendingRequest
     {
         return Http::timeout(120)
+            ->retry(...HttpEngine::connectRetry())
             ->baseUrl('https://api.dataforseo.com/v3')
             ->withBasicAuth((string) $connection->credential('login'), (string) $connection->credential('password'))
             ->acceptJson()

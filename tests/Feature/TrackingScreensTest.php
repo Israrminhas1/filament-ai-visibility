@@ -87,6 +87,13 @@ it('warns in the confirmation when the daily run limit is already reached', func
         ->assertActionExists('runNow', fn (\Filament\Actions\Action $action) => str_contains((string) $action->getModalDescription(), 'has reached its limit of 1 runs today'));
 });
 
+it('warns in the confirmation when the budget does not cover the run', function () {
+    app(\IsrarMinhas\FilamentAiVisibility\Support\Settings::class)->set(['budget' => ['monthly_usd' => 0.001]]);
+
+    livewire(EditBrand::class, ['record' => $this->brand->getRouteKey()])
+        ->assertActionExists('runNow', fn (\Filament\Actions\Action $action) => str_contains((string) $action->getModalDescription(), 'of the monthly budget is left'));
+});
+
 it('retries skipped answers from the run page', function () {
     $run = app(RunPlanner::class)->start($this->brand);
     app(EngineManager::class)->pause('openai', PauseReason::InvalidKey);

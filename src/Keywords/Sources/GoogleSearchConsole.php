@@ -7,6 +7,7 @@ use Filament\Forms\Components\TextInput;
 use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Support\Facades\Http;
 use IsrarMinhas\FilamentAiVisibility\Detection\Domains;
+use IsrarMinhas\FilamentAiVisibility\Engines\Drivers\HttpEngine;
 use IsrarMinhas\FilamentAiVisibility\Keywords\Contracts\KeywordSource;
 use IsrarMinhas\FilamentAiVisibility\Keywords\KeywordData;
 use IsrarMinhas\FilamentAiVisibility\Keywords\SourceFailed;
@@ -64,7 +65,7 @@ class GoogleSearchConsole implements KeywordSource
     {
         try {
             $token = $this->token($connection);
-            $response = Http::timeout(30)->withToken($token)->get('https://www.googleapis.com/webmasters/v3/sites');
+            $response = Http::timeout(30)->retry(...HttpEngine::connectRetry())->withToken($token)->get('https://www.googleapis.com/webmasters/v3/sites');
         } catch (SourceFailed $e) {
             return SourceTestResult::failed($e->getMessage(), $e->credentialsRejected);
         } catch (ConnectionException) {
@@ -164,7 +165,7 @@ class GoogleSearchConsole implements KeywordSource
     protected function sites(string $token): array
     {
         try {
-            $response = Http::timeout(30)->withToken($token)->get('https://www.googleapis.com/webmasters/v3/sites');
+            $response = Http::timeout(30)->retry(...HttpEngine::connectRetry())->withToken($token)->get('https://www.googleapis.com/webmasters/v3/sites');
         } catch (ConnectionException) {
             throw new SourceFailed('Could not reach Google.');
         }
@@ -187,7 +188,7 @@ class GoogleSearchConsole implements KeywordSource
         }
 
         try {
-            $response = Http::timeout(60)->withToken($token)->post(
+            $response = Http::timeout(60)->retry(...HttpEngine::connectRetry())->withToken($token)->post(
                 'https://www.googleapis.com/webmasters/v3/sites/' . rawurlencode($property) . '/searchAnalytics/query',
                 [
                     'startDate' => now()->subDays(90)->toDateString(),
@@ -250,7 +251,7 @@ class GoogleSearchConsole implements KeywordSource
         $segments[] = $this->base64url($signature);
 
         try {
-            $response = Http::asForm()->timeout(30)->post($key['token_uri'] ?? 'https://oauth2.googleapis.com/token', [
+            $response = Http::asForm()->timeout(30)->retry(...HttpEngine::connectRetry())->post($key['token_uri'] ?? 'https://oauth2.googleapis.com/token', [
                 'grant_type' => 'urn:ietf:params:oauth:grant-type:jwt-bearer',
                 'assertion' => implode('.', $segments),
             ]);
