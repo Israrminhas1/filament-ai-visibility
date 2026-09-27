@@ -1,5 +1,11 @@
 # Changelog
 
+## v1.0.0 — 2026-09-27
+
+First stable release.
+
+- The visibility chart connects runs on weekly schedules instead of showing scattered dots; Google engines have their own colours.
+
 ## v1.0.0-beta.1 — 2026-09-26
 
 First public beta. It includes everything in the sections below.

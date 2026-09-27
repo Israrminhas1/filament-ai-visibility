@@ -12,7 +12,7 @@ Track how your brand shows up in answers from ChatGPT, Claude, Gemini, Perplexit
 
 <sub>Screenshots use fictional sample data.</sub>
 
-> **Status: beta (`v1.0.0-beta.1`).** Please [open an issue](https://github.com/Israrminhas1/filament-ai-visibility/issues) if something doesn't work.
+Covered by 550+ automated tests on Filament 4 and 5. Found a problem? [Open an issue](https://github.com/Israrminhas1/filament-ai-visibility/issues).
 
 ## Documentation
 
