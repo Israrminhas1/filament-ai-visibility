@@ -66,9 +66,9 @@ Default models are in `config/ai-visibility.php` under `engines` and can be chan
 
 ### Google Gemini
 
-- Default models: `gemini-3.8-flash` (tracking), `gemini-3.5-flash-lite` (helper).
-- Suggestions: `gemini-3.8-flash`, `gemini-3.7-flash`, `gemini-3.5-flash`, `gemini-3.5-flash-lite`, `gemini-3.1-pro-preview`, `gemini-2.5-flash`, `gemini-2.5-pro`. The 2.5 models only work for projects that already used them.
-- Uses the `google_search` tool (grounding). The key is sent in a header, never in the URL.
+- Default models: `gemini-3.5-flash` (tracking), `gemini-3.5-flash-lite` (helper).
+- Suggestions: `gemini-3.5-flash`, `gemini-3.5-flash-lite`, `gemini-2.5-flash`. Only models that reliably search and return sources are suggested: Gemini 3.8, 3.7 and 3.1 Pro often answer without searching, so their answers would have no sources. `gemini-2.5-flash` only works for projects that already used it.
+- Uses the `google_search` tool (grounding), with an instruction to search before answering. The key is sent in a header, never in the URL.
 - Sources: grounding chunks. Google redirect links are replaced by the source's domain when the title holds it.
 - Searches: Gemini 3 models count every search query; Gemini 2.5 counts one per grounded prompt. Output tokens include thinking tokens.
 - Key test: `GET /models` (free).

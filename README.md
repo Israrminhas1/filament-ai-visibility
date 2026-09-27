@@ -103,7 +103,7 @@ Both Google engines share one SerpAPI key and cost one SerpAPI search per answer
 
 The brand's market (e.g. "United Kingdom" or "GB") is sent as the search location where the engine supports it.
 
-The model pickers only suggest current models that support web search and return their sources (defaults: `gpt-6-luna`, `claude-sonnet-5`, `gemini-3.8-flash`, `grok-4.7`, `perplexity/sonar`). You can type any other model name; if the provider says it can't search the web or doesn't exist, the engine pauses with that reason instead of failing every answer. Gemini 2.5 models are listed for projects that already have access to them.
+The model pickers only suggest current models that support web search and return their sources (defaults: `gpt-6-luna`, `claude-sonnet-5`, `gemini-3.5-flash`, `grok-4.7`, `perplexity/sonar`). You can type any other model name; if the provider says it can't search the web or doesn't exist, the engine pauses with that reason instead of failing every answer. Gemini 2.5 models are listed for projects that already have access to them.
 
 For every answer AI Visibility records:
 - whether the brand is mentioned, how often, and its position among all tracked brands

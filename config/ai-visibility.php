@@ -103,10 +103,12 @@ return [
             'models' => ['claude-fable-5-1', 'claude-opus-5-5', 'claude-sonnet-5', 'claude-haiku-4-5'],
         ],
         'gemini' => [
-            'tracking_model' => 'gemini-3.8-flash',
+            'tracking_model' => 'gemini-3.5-flash',
             'helper_model' => 'gemini-3.5-flash-lite',
-            // 2.5 models are only available to projects that already used them.
-            'models' => ['gemini-3.8-flash', 'gemini-3.7-flash', 'gemini-3.5-flash', 'gemini-3.5-flash-lite', 'gemini-3.1-pro-preview', 'gemini-2.5-flash', 'gemini-2.5-pro'],
+            // Only models that reliably search and return sources (tested against the live API).
+            // Gemini 3.8 / 3.7 / 3.1 Pro often answer without searching. 2.5 Flash is only
+            // available to projects that already used it.
+            'models' => ['gemini-3.5-flash', 'gemini-3.5-flash-lite', 'gemini-2.5-flash'],
         ],
         'grok' => [
             'tracking_model' => 'grok-4.7',

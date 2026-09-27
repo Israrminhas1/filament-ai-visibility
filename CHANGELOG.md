@@ -1,5 +1,10 @@
 # Changelog
 
+## v1.0.3 — 2026-09-27
+
+- Gemini: only models that reliably search and return sources are offered (`gemini-3.5-flash`, now the default, `gemini-3.5-flash-lite`, `gemini-2.5-flash`). Tested against the live API: Gemini 3.8, 3.7 and 3.1 Pro often answered without searching, and `gemini-2.5-pro` is no longer available to new users.
+- Gemini requests now include an instruction to search before answering.
+
 ## v1.0.2 — 2026-09-27
 
 - Fixed: Perplexity sometimes answered from memory, with no web search and no sources. Requests now tell it to search first.

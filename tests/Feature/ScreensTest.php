@@ -32,7 +32,7 @@ describe('settings page', function () {
     it('saves settings and keys without sending keys back to the browser', function () {
         livewire(ManageSettings::class)
             ->fillForm([
-                'engines' => ['gemini' => ['enabled' => true, 'api_key' => 'g-secret-key', 'model' => 'gemini-2.5-pro']],
+                'engines' => ['gemini' => ['enabled' => true, 'api_key' => 'g-secret-key', 'model' => 'gemini-3.5-flash-lite']],
                 'runs' => ['samples' => 3],
                 'limits' => ['max_active_prompts_per_brand' => null, 'max_competitors_per_brand' => 5],
                 'budget' => ['monthly_usd' => 25],
@@ -47,7 +47,7 @@ describe('settings page', function () {
         $settings = app(Settings::class);
 
         expect($settings->get('engines.enabled'))->toBe(['gemini'])
-            ->and($settings->get('engines.models'))->toBe(['gemini' => 'gemini-2.5-pro'])
+            ->and($settings->get('engines.models'))->toBe(['gemini' => 'gemini-3.5-flash-lite'])
             ->and($settings->get('runs.samples'))->toBe(3)
             ->and($settings->get('limits.max_active_prompts_per_brand'))->toBe(0)
             ->and($settings->get('limits.max_competitors_per_brand'))->toBe(5)

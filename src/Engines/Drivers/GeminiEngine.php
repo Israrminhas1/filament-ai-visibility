@@ -56,6 +56,8 @@ class GeminiEngine extends HttpEngine
     protected function sendAsk(PendingRequest $http, EngineRequest $request): Response
     {
         return $http->post('/models/' . rawurlencode($request->model) . ':generateContent', [
+            // Gemini decides per question whether to search; this makes it search more often.
+            'systemInstruction' => ['parts' => [['text' => 'Always use Google Search to find current information before answering. Base your answer on the search results.']]],
             'contents' => [['role' => 'user', 'parts' => [['text' => $request->prompt]]]],
             'tools' => [['google_search' => (object) []]],
         ]);

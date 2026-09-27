@@ -107,7 +107,7 @@ In a multi-tenant install, AI Monitor and environment keys are shared by every t
 | `engines.{engine}.helper_model` | Model used when this engine does helper work (analysis, classification, generation) in "Automatic" mode. Usually a cheaper model. |
 | `engines.{engine}.models` | Suggestions in the model picker. Users can also type any model name. List only models that support the engine's web search and return sources. |
 
-Defaults: `gpt-6-luna`, `claude-sonnet-5`, `gemini-3.8-flash` (helper `gemini-3.5-flash-lite`), `grok-4.7` (helper `grok-4.3`), `perplexity/sonar`. The Google engines have no model choice. Model names change often; check each provider's model list. Details per engine: [Engines and costs](engines-and-costs.md).
+Defaults: `gpt-6-luna`, `claude-sonnet-5`, `gemini-3.5-flash` (helper `gemini-3.5-flash-lite`), `grok-4.7` (helper `grok-4.3`), `perplexity/sonar`. The Google engines have no model choice. Model names change often; check each provider's model list. Details per engine: [Engines and costs](engines-and-costs.md).
 
 ### Helper engine order
 
