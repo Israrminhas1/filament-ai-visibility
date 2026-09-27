@@ -117,7 +117,7 @@ it('reads Perplexity Agent API and Grok answers', function () {
                     ['type' => 'url_citation', 'url' => 'https://acme.com', 'title' => 'Acme'],
                 ]]]],
             ],
-            'usage' => ['input_tokens' => 10, 'output_tokens' => 5, 'tool_calls_details' => ['web_search' => ['invocation' => 2]]],
+            'usage' => ['input_tokens' => 10, 'output_tokens' => 5, 'tool_calls_details' => ['search_web' => ['cost_usd' => 0.005, 'invocation' => 2]]],
         ]),
         'api.x.ai/*' => Http::response([
             'output' => [['type' => 'message', 'content' => [['type' => 'output_text', 'text' => 'Globex.']]]],
@@ -171,7 +171,8 @@ it('sends Perplexity requests to the Agent API with web search, and maps old Son
     Http::assertSent(fn ($request) => $request->url() === 'https://api.perplexity.ai/v1/agent'
         && ($request['model'] ?? null) === 'perplexity/sonar'
         && $request['tools'][0] === ['type' => 'web_search', 'user_location' => ['country' => 'GB']]
-        && $request['max_output_tokens'] > 0);
+        && $request['max_output_tokens'] > 0
+        && str_contains($request['instructions'] ?? '', 'Search the web'));
 
     Http::assertSent(fn ($request) => ($request['preset'] ?? null) === 'low' && ! isset($request['model']));
 });

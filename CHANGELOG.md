@@ -1,5 +1,10 @@
 # Changelog
 
+## v1.0.2 — 2026-09-27
+
+- Fixed: Perplexity sometimes answered from memory, with no web search and no sources. Requests now tell it to search first.
+- Fixed: Perplexity search counts are read from `search_web`, the field the API actually returns.
+
 ## v1.0.1 — 2026-09-27
 
 - Fixed: the setup wizard's Prompts step failed on Laravel 11 and 12 (it used a query method that only exists in Laravel 13).

@@ -80,6 +80,8 @@ class PerplexityEngine extends HttpEngine
             }
 
             $body['tools'] = [$tool];
+            // Without this the model sometimes answers from memory, with no sources.
+            $body['instructions'] = 'Search the web for current information before answering, and base the answer on what you find.';
         }
 
         return $http->post('/agent', $body);
@@ -105,7 +107,10 @@ class PerplexityEngine extends HttpEngine
             model: $answer->model,
             inputTokens: $answer->inputTokens,
             outputTokens: $answer->outputTokens,
-            searches: (int) ($response->json('usage.tool_calls_details.web_search.invocation') ?? $searchItems),
+            // The API reports searches as "search_web" (older docs showed "web_search").
+            searches: (int) ($response->json('usage.tool_calls_details.search_web.invocation')
+                ?? $response->json('usage.tool_calls_details.web_search.invocation')
+                ?? $searchItems),
         );
     }
 
