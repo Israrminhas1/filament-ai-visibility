@@ -23,6 +23,7 @@ use IsrarMinhas\FilamentAiVisibility\Models\Topic;
 use IsrarMinhas\FilamentAiVisibility\Prompts\PromptGenerator;
 use IsrarMinhas\FilamentAiVisibility\Prompts\TopicClusterer;
 use IsrarMinhas\FilamentAiVisibility\Support\Settings;
+use IsrarMinhas\FilamentAiVisibility\Support\Text;
 
 class GeneratePromptsAction
 {
@@ -118,7 +119,7 @@ class GeneratePromptsAction
         }
 
         $notification = Notification::make()
-            ->title("{$result['suggested']->count()} prompts suggested for {$brand->name}")
+            ->title(Text::count($result['suggested']->count(), 'prompt') . " suggested for {$brand->name}")
             ->body($result['rejected']->count() ? "{$result['rejected']->count()} weak ideas were filtered out (kept as Rejected, with the reason)." : null)
             ->success();
 
@@ -177,7 +178,7 @@ class GeneratePromptsAction
 
                 $assigned = app(TopicClusterer::class)->apply($brand(), $proposal, (bool) ($data['replace'] ?? false));
 
-                Notification::make()->title("{$assigned} prompts assigned to " . count($proposal) . ' topics')->success()->send();
+                Notification::make()->title(Text::count($assigned, 'prompt') . ' assigned to ' . Text::count(count($proposal), 'topic'))->success()->send();
             });
     }
 }

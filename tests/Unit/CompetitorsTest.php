@@ -635,6 +635,34 @@ describe('robustness', function () {
         Http::assertNotSent(fn ($request) => str_contains((string) ($request['input'] ?? ''), 'secret'));
     });
 
+    it('gives the titles of cited pages as evidence for sites that cannot be read', function () {
+        $result = Result::query()->where('brand_id', $this->brand->id)->first();
+        $result->citations()->create(['url' => 'https://hooli.com/crm-for-agencies', 'domain' => 'hooli.com', 'title' => 'Hooli CRM for agencies', 'position' => 9]);
+
+        $other = $this->createBrand(['name' => 'Other', 'domains' => ['other.com']]);
+        $otherRun = Run::query()->create(['brand_id' => $other->id, 'results_total' => 1]);
+        Result::query()->create([
+            'run_id' => $otherRun->id, 'brand_id' => $other->id, 'prompt_id' => $other->prompts()->create(['text' => 'Other?'])->id,
+            'engine' => 'openai', 'status' => ResultStatus::Success, 'answer' => 'x', 'ran_at' => now(),
+        ])->citations()->create(['url' => 'https://hooli.com/secret', 'domain' => 'hooli.com', 'title' => 'Hooli secret roadmap', 'position' => 1]);
+
+        $hooli = Candidate::query()->create([
+            'brand_id' => $this->brand->id, 'key' => 'domain:hooli.com', 'kind' => 'domain', 'name' => 'hooli.com',
+            'domain' => 'hooli.com', 'answers' => 1, 'prompts' => 1, 'engines' => ['openai'], 'score' => 50, 'status' => Candidate::STATUS_NEW,
+        ]);
+
+        Http::fake([
+            'api.openai.com/*' => helperReply(['results' => [['key' => "c{$hooli->id}", 'label' => 'direct_competitor', 'confidence' => 'medium']]]),
+            '*' => Http::response('', 403),
+        ]);
+
+        app(Classifier::class)->classify($this->brand, collect([$hooli]));
+
+        expect($hooli->latestClassification->evidence['cited_pages'])->toBe(['Hooli CRM for agencies — https://hooli.com/crm-for-agencies']);
+        Http::assertSent(fn ($request) => str_contains((string) ($request['input'] ?? ''), 'pages cited in answers: Hooli CRM for agencies'));
+        Http::assertNotSent(fn ($request) => str_contains((string) ($request['input'] ?? ''), 'secret'));
+    });
+
     it('accepts a candidate only once', function () {
         app(Discovery::class)->discover($this->brand);
         $candidate = Candidate::query()->where('domain', 'globex.io')->first();

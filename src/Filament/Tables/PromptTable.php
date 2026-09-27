@@ -17,6 +17,7 @@ use IsrarMinhas\FilamentAiVisibility\Models\Brand;
 use IsrarMinhas\FilamentAiVisibility\Models\Prompt;
 use IsrarMinhas\FilamentAiVisibility\Models\Topic;
 use IsrarMinhas\FilamentAiVisibility\Support\Limits;
+use IsrarMinhas\FilamentAiVisibility\Support\Text;
 
 class PromptTable
 {
@@ -94,7 +95,7 @@ class PromptTable
                     }
 
                     Notification::make()
-                        ->title("Activated {$activated} prompts")
+                        ->title('Activated ' . Text::count($activated, 'prompt'))
                         ->body($skipped ? "{$skipped} were not activated because of the active-prompt limit." : null)
                         ->status($skipped ? 'warning' : 'success')
                         ->send();

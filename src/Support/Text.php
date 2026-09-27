@@ -37,6 +37,14 @@ class Text
     /**
      * Collapse whitespace and trim.
      */
+    /**
+     * "1 answer", "3 answers".
+     */
+    public static function count(int $count, string $singular): string
+    {
+        return $count . ' ' . str($singular)->plural($count);
+    }
+
     public static function squish(?string $text): string
     {
         return trim((string) preg_replace('/\s+/u', ' ', mb_scrub((string) $text, 'UTF-8')));

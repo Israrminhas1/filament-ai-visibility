@@ -24,32 +24,32 @@ use Filament\Schemas\Components\Wizard;
 use Filament\Schemas\Components\Wizard\Step;
 use Filament\Schemas\Schema;
 use Filament\Support\Exceptions\Halt;
+use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Blade;
 use Illuminate\Support\Facades\DB;
-use Illuminate\Support\Collection;
 use Illuminate\Support\HtmlString;
 use Illuminate\Support\Str;
 use IsrarMinhas\FilamentAiVisibility\AiVisibilityPlugin;
 use IsrarMinhas\FilamentAiVisibility\Competitors\CompetitorSuggester;
-use IsrarMinhas\FilamentAiVisibility\Prompts\PromptGenerator;
-use IsrarMinhas\FilamentAiVisibility\Exceptions\HelperUnavailable;
 use IsrarMinhas\FilamentAiVisibility\Engines\EngineManager;
 use IsrarMinhas\FilamentAiVisibility\Engines\EngineRegistry;
 use IsrarMinhas\FilamentAiVisibility\Enums\KeywordSource;
 use IsrarMinhas\FilamentAiVisibility\Enums\PromptStatus;
 use IsrarMinhas\FilamentAiVisibility\Enums\RunFrequency;
+use IsrarMinhas\FilamentAiVisibility\Exceptions\HelperUnavailable;
 use IsrarMinhas\FilamentAiVisibility\Exceptions\LimitExceeded;
+use IsrarMinhas\FilamentAiVisibility\Filament\Concerns\FillsBrandFromWebsite;
 use IsrarMinhas\FilamentAiVisibility\Filament\Concerns\HasAiVisibilityNavigation;
 use IsrarMinhas\FilamentAiVisibility\Filament\Forms\EngineFields;
 use IsrarMinhas\FilamentAiVisibility\Filament\Resources\BrandResource;
 use IsrarMinhas\FilamentAiVisibility\Models\Brand;
+use IsrarMinhas\FilamentAiVisibility\Prompts\PromptGenerator;
 use IsrarMinhas\FilamentAiVisibility\Support\CostEstimator;
 use IsrarMinhas\FilamentAiVisibility\Support\Health\SystemHealth;
 use IsrarMinhas\FilamentAiVisibility\Support\Importer;
 use IsrarMinhas\FilamentAiVisibility\Support\Limits;
-use IsrarMinhas\FilamentAiVisibility\Support\Text as TextHelper;
 use IsrarMinhas\FilamentAiVisibility\Support\Settings;
-use IsrarMinhas\FilamentAiVisibility\Support\WebsiteProfile;
+use IsrarMinhas\FilamentAiVisibility\Support\Text as TextHelper;
 
 class Setup extends Page
 {
@@ -401,57 +401,9 @@ class Setup extends Page
 
     protected function prefillFromWebsite(Get $get, Set $set): void
     {
-        $domain = Brand::normalizeDomain((string) $get('brand.domain'));
-
-        if (! $domain) {
-            Notification::make()->title('Enter a website first')->warning()->send();
-
-            return;
+        if ($domain = FillsBrandFromWebsite::fill($get('brand.domain'), $get, $set, 'brand.')) {
+            $set('brand.domain', $domain);
         }
-
-        $profile = app(WebsiteProfile::class)->fetch($domain);
-
-        if (! $profile) {
-            Notification::make()->title('Could not read ' . $domain)->body('Fill in the details manually.')->warning()->send();
-
-            return;
-        }
-
-        $set('brand.domain', $domain);
-
-        if (blank($get('brand.name')) && $profile['name']) {
-            $name = $this->withoutLegalSuffix($profile['name']);
-            $set('brand.name', $name);
-
-            // Keep the full legal name as another name, so it still counts as a mention.
-            if ($name !== $profile['name']) {
-                $set('brand.aliases', array_values(array_unique([...($get('brand.aliases') ?? []), $profile['name']])));
-            }
-        }
-
-        if (blank($get('brand.description')) && $profile['description']) {
-            $set('brand.description', $profile['description']);
-        }
-
-        Notification::make()->title('Details filled in from ' . $domain)->body('Check them before continuing.')->success()->send();
-    }
-
-    /**
-     * "Nintendo Co., Ltd." → "Nintendo", "Acme GmbH" → "Acme". Returns the name
-     * unchanged when nothing would be left.
-     */
-    protected function withoutLegalSuffix(string $name): string
-    {
-        $suffixes = 'co\.?,?\s*ltd|co\.?,?\s*limited|corporation|corp|incorporated|inc|llc|l\.l\.c|ltd|limited|plc|gmbh(?:\s*&\s*co\.?\s*kg)?|ag|kg|sa|s\.a|sas|sarl|s\.r\.l|srl|spa|s\.p\.a|bv|b\.v|nv|n\.v|oy|ab|as|a\/s|aps|pty\.?\s*ltd|pte\.?\s*ltd|kk|k\.k|co|lp|llp';
-        $stripped = $name;
-
-        // Repeat for names like "Acme Holdings Co., Ltd." ending in more than one suffix.
-        do {
-            $previous = $stripped;
-            $stripped = rtrim((string) preg_replace('/[\s,]+(?:' . $suffixes . ')\.?$/iu', '', $stripped), ' ,.');
-        } while ($stripped !== $previous && $stripped !== '');
-
-        return $stripped !== '' ? $stripped : $name;
     }
 
     /**
@@ -567,10 +519,10 @@ class Setup extends Page
                     $overLimit = $result['over_limit'] ?? 0;
 
                     Notification::make()
-                        ->title("Added {$result['created']} keywords")
+                        ->title('Added ' . TextHelper::count($result['created'], 'keyword'))
                         ->body(collect([
                             $overLimit ? "Only the first {$result['created']} new keywords were added because of the keyword limit; {$overLimit} were left out." : null,
-                            ($result['too_long'] ?? 0) ? "{$result['too_long']} keywords longer than 255 characters were skipped." : null,
+                            ($result['too_long'] ?? 0) ? TextHelper::count($result['too_long'], 'keyword') . ' longer than 255 characters were skipped.' : null,
                         ])->filter()->implode(' ') ?: null)
                         ->status($overLimit || ($result['too_long'] ?? 0) ? 'warning' : 'success')
                         ->send();
@@ -612,7 +564,7 @@ class Setup extends Page
         $set('prompts', $rows->all());
 
         Notification::make()
-            ->title($added ? "Added {$added} questions" : 'No new questions')
+            ->title($added ? 'Added ' . TextHelper::count($added, 'question') : 'No new questions')
             ->body('Edit or delete any you don\'t want, then continue.' . ($result['candidates']->where('passed', false)->count() ? ' Weak ideas were left out.' : ''))
             ->success()
             ->send();
@@ -654,7 +606,7 @@ class Setup extends Page
 
                 if ($result['created'] > 0 || $result['reactivated'] > 0 || $result['paused'] > 0) {
                     Notification::make()
-                        ->title($result['created'] > 0 ? "Added {$result['created']} prompts" : 'Prompts saved')
+                        ->title($result['created'] > 0 ? 'Added ' . TextHelper::count($result['created'], 'prompt') : 'Prompts saved')
                         ->body(collect([
                             $result['reactivated'] ? "{$result['reactivated']} earlier prompts were turned back on." : null,
                             $result['paused'] ? "{$result['paused']} were saved as paused because of the active-prompt limit. They are still listed; remove others or raise the limit to track them." : null,

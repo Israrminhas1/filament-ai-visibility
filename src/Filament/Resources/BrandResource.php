@@ -2,6 +2,7 @@
 
 namespace IsrarMinhas\FilamentAiVisibility\Filament\Resources;
 
+use Filament\Actions\Action;
 use Filament\Actions\DeleteAction;
 use Filament\Actions\EditAction;
 use Filament\Forms\Components\CheckboxList;
@@ -14,6 +15,8 @@ use Filament\Resources\Resource;
 use Filament\Schemas\Components\Section;
 use Filament\Schemas\Components\Tabs;
 use Filament\Schemas\Components\Tabs\Tab;
+use Filament\Schemas\Components\Utilities\Get;
+use Filament\Schemas\Components\Utilities\Set;
 use Filament\Schemas\Schema;
 use Filament\Tables\Columns\TextColumn;
 use Filament\Tables\Columns\ToggleColumn;
@@ -22,6 +25,7 @@ use IsrarMinhas\FilamentAiVisibility\AiVisibilityPlugin;
 use IsrarMinhas\FilamentAiVisibility\Engines\EngineRegistry;
 use IsrarMinhas\FilamentAiVisibility\Enums\RunFrequency;
 use IsrarMinhas\FilamentAiVisibility\Filament\Actions\RunNowAction;
+use IsrarMinhas\FilamentAiVisibility\Filament\Concerns\FillsBrandFromWebsite;
 use IsrarMinhas\FilamentAiVisibility\Filament\Concerns\HasAiVisibilityNavigation;
 use IsrarMinhas\FilamentAiVisibility\Filament\Resources\BrandResource\Pages;
 use IsrarMinhas\FilamentAiVisibility\Filament\Resources\BrandResource\RelationManagers;
@@ -67,6 +71,12 @@ class BrandResource extends Resource
                                     ->label('Websites')
                                     ->placeholder('acme.com')
                                     ->helperText('The first one is the main website. Subdomains count automatically.')
+                                    ->hintAction(
+                                        Action::make('fetchWebsite')
+                                            ->label('Fill in from website')
+                                            ->icon('heroicon-o-arrow-down-tray')
+                                            ->action(fn (Get $get, Set $set) => FillsBrandFromWebsite::fill($get('domains')[0] ?? null, $get, $set)),
+                                    )
                                     ->required(),
                                 Textarea::make('description')
                                     ->label('What the brand offers')

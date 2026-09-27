@@ -25,6 +25,7 @@ use IsrarMinhas\FilamentAiVisibility\Filament\Concerns\HasAiVisibilityNavigation
 use IsrarMinhas\FilamentAiVisibility\Filament\Resources\CandidateResource\Pages;
 use IsrarMinhas\FilamentAiVisibility\Jobs\ClassifyCandidatesJob;
 use IsrarMinhas\FilamentAiVisibility\Models\Candidate;
+use IsrarMinhas\FilamentAiVisibility\Support\Text;
 
 class CandidateResource extends Resource
 {
@@ -113,6 +114,11 @@ class CandidateResource extends Resource
                             ->listWithLineBreaks()
                             ->bulleted()
                             ->placeholder('—'),
+                        TextEntry::make('latestClassification.evidence.cited_pages')
+                            ->label('Its pages cited in answers')
+                            ->listWithLineBreaks()
+                            ->bulleted()
+                            ->placeholder('—'),
                     ]),
             ]);
     }
@@ -132,7 +138,7 @@ class CandidateResource extends Resource
                 TextColumn::make('label')->badge()->placeholder('Not classified')->sortable(),
                 TextColumn::make('confidence')->badge()->color(fn (?string $state) => ['high' => 'success', 'medium' => 'warning'][$state] ?? 'gray')->placeholder('—')->toggleable(),
                 TextColumn::make('answers')->label('Answers')->sortable()
-                    ->description(fn (Candidate $record) => "{$record->prompts} prompts · " . count($record->engines ?? []) . ' engines'),
+                    ->description(fn (Candidate $record) => Text::count((int) $record->prompts, 'prompt') . ' · ' . Text::count(count($record->engines ?? []), 'engine')),
                 TextColumn::make('status')
                     ->badge()
                     ->formatStateUsing(fn (string $state) => Candidate::statuses()[$state] ?? $state)
@@ -213,7 +219,7 @@ class CandidateResource extends Resource
                                 }
                             }
 
-                            Notification::make()->title("Now tracking {$accepted} competitors")->success()->send();
+                            Notification::make()->title("Now tracking {$accepted} " . str('competitor')->plural($accepted))->success()->send();
                         })
                         ->deselectRecordsAfterCompletion(),
                     BulkAction::make('classifySelected')
@@ -236,7 +242,7 @@ class CandidateResource extends Resource
 
                             Notification::make()
                                 ->title('Classification started in the background')
-                                ->body("{$records->count()} candidates will be classified in a few minutes.")
+                                ->body($records->count() . ' ' . str('candidate')->plural($records->count()) . ' will be classified in a few minutes.')
                                 ->success()
                                 ->send();
                         })

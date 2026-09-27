@@ -8,6 +8,7 @@ use IsrarMinhas\FilamentAiVisibility\Models\Result;
 use IsrarMinhas\FilamentAiVisibility\Models\ResultMention;
 use IsrarMinhas\FilamentAiVisibility\Support\Settings;
 use IsrarMinhas\FilamentAiVisibility\Support\Tenancy;
+use IsrarMinhas\FilamentAiVisibility\Support\Text;
 
 /**
  * Removes the full text of old answers (Settings → Safety & data → "Keep
@@ -48,7 +49,7 @@ class PruneAnswersCommand extends Command
             ->where('ran_at', '<', now()->subDays($days));
 
         if ($this->option('dry-run')) {
-            $this->components->twoColumnDetail($label, $old->count() . " answers older than {$days} days would be removed");
+            $this->components->twoColumnDetail($label, Text::count($old->count(), 'answer') . " older than {$days} days would be removed");
 
             return;
         }
@@ -63,6 +64,6 @@ class PruneAnswersCommand extends Command
             $removed += Result::query()->whereKey($ids)->update(['answer' => null]);
         });
 
-        $this->components->twoColumnDetail($label, "{$removed} answers older than {$days} days removed");
+        $this->components->twoColumnDetail($label, Text::count($removed, 'answer') . " older than {$days} days removed");
     }
 }

@@ -9,6 +9,7 @@ use IsrarMinhas\FilamentAiVisibility\Enums\ResultStatus;
 use IsrarMinhas\FilamentAiVisibility\Filament\Resources\RunResource;
 use IsrarMinhas\FilamentAiVisibility\Models\Run;
 use IsrarMinhas\FilamentAiVisibility\Runs\RunPlanner;
+use IsrarMinhas\FilamentAiVisibility\Support\Text;
 
 class ViewRun extends ViewRecord
 {
@@ -27,7 +28,7 @@ class ViewRun extends ViewRecord
                 ->action(function (Run $record) {
                     $count = app(RunPlanner::class)->retryUnanswered($record);
 
-                    Notification::make()->title("Retrying {$count} answers")->success()->send();
+                    Notification::make()->title('Retrying ' . Text::count($count, 'answer'))->success()->send();
                 }),
         ];
     }

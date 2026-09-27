@@ -42,7 +42,7 @@ describe('pruning old answers', function () {
 
     it('keeps everything when the limit is 0, and can count first', function () {
         $this->artisan('ai-visibility:prune', ['--dry-run' => true])
-            ->expectsOutputToContain('1 answers older than 365 days would be removed')
+            ->expectsOutputToContain('1 answer older than 365 days would be removed')
             ->assertSuccessful();
         expect($this->old->fresh()->answer)->not->toBeNull();
 

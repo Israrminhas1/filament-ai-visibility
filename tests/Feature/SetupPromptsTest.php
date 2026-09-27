@@ -64,7 +64,7 @@ it('turns a paused prompt back on when its text is typed again', function () {
             ['id' => null, 'text' => 'Cheapest CRM for startups?'],
         ]])
         ->goToWizardStep(8)
-        ->assertNotified('Added 1 prompts');
+        ->assertNotified('Added 1 prompt');
 
     expect($paused->fresh()->status)->toBe(PromptStatus::Active)
         ->and(Prompt::query()->find($edited->id))->toBeNull()
@@ -112,5 +112,5 @@ it('counts only questions that were really added when generating', function () {
     livewire(Setup::class)
         ->fillForm(['prompts' => [['id' => null, 'text' => 'Which CRM integrates best with Slack?']]])
         ->callAction(TestAction::make('generatePrompts')->schemaComponent('promptActions', schema: 'form'))
-        ->assertNotified('Added 1 questions');
+        ->assertNotified('Added 1 question');
 })->skip(fn () => ! method_exists(TestAction::class, 'schemaComponent'), 'Needs schema component action testing');

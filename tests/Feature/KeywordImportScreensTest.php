@@ -21,7 +21,7 @@ it('imports a Windows-1252 CSV with a friendly count of skipped rows', function 
 
     livewire(ListKeywords::class)
         ->callAction('addKeywords', ['brand_id' => $this->brand->id, 'csv' => $csv])
-        ->assertNotified('Added 1 keywords');
+        ->assertNotified('Added 1 keyword');
 
     expect(Keyword::query()->pluck('search_volume', 'keyword')->all())->toBe(['café crm' => 1200]);
 });

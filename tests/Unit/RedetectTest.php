@@ -78,7 +78,7 @@ it('re-checks past answers when the brand or its competitors change', function (
 
 it('can be run by hand', function () {
     $this->artisan('ai-visibility:redetect', ['--brand' => $this->brand->id])
-        ->expectsOutputToContain('1 answers changed')
+        ->expectsOutputToContain('1 answer changed')
         ->assertSuccessful();
 });
 

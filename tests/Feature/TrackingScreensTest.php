@@ -106,7 +106,7 @@ it('retries skipped answers from the run page', function () {
 
     livewire(ViewRun::class, ['record' => $run->getRouteKey()])
         ->callAction('retryUnanswered')
-        ->assertNotified('Retrying 1 answers');
+        ->assertNotified('Retrying 1 answer');
 
     Queue::assertPushed(RunResultJob::class, 1);
     expect(Result::query()->first()->status)->toBe(ResultStatus::Pending);

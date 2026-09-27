@@ -12,6 +12,7 @@ use IsrarMinhas\FilamentAiVisibility\Filament\Resources\RunResource;
 use IsrarMinhas\FilamentAiVisibility\Models\Brand;
 use IsrarMinhas\FilamentAiVisibility\Runs\RunPlanner;
 use IsrarMinhas\FilamentAiVisibility\Support\CostEstimator;
+use IsrarMinhas\FilamentAiVisibility\Support\Text;
 
 class RunNowAction
 {
@@ -64,7 +65,7 @@ class RunNowAction
 
                 $notification = Notification::make()
                     ->title('Run started')
-                    ->body("Collecting {$run->results_total} answers. You'll be notified when it finishes.")
+                    ->body('Collecting ' . Text::count($run->results_total, 'answer') . ". You'll be notified when it finishes.")
                     ->success();
 
                 if ($url = AiVisibilityPlugin::pageUrl(RunResource::class, 'view', ['record' => $run])) {

@@ -17,6 +17,7 @@ use IsrarMinhas\FilamentAiVisibility\Exceptions\LimitExceeded;
 use IsrarMinhas\FilamentAiVisibility\Filament\Tables\PromptTable;
 use IsrarMinhas\FilamentAiVisibility\Models\Brand;
 use IsrarMinhas\FilamentAiVisibility\Support\Importer;
+use IsrarMinhas\FilamentAiVisibility\Support\Text;
 use Throwable;
 
 /**
@@ -60,7 +61,7 @@ class ImportAction
                 $maxRows = Importer::maxImportRows();
 
                 Notification::make()
-                    ->title("Added {$result['created']} prompts")
+                    ->title('Added ' . Text::count($result['created'], 'prompt'))
                     ->body(collect([
                         $result['skipped'] ? "{$result['skipped']} duplicates skipped." : null,
                         $result['paused'] ? "{$result['paused']} saved as paused (active-prompt limit)." : null,
@@ -100,10 +101,10 @@ class ImportAction
                 $overLimit = $result['over_limit'] ?? 0;
 
                 Notification::make()
-                    ->title("Added {$result['created']} keywords")
+                    ->title('Added ' . Text::count($result['created'], 'keyword'))
                     ->body(collect([
                         $result['skipped'] ? "{$result['skipped']} duplicates skipped." : null,
-                        $tooLong ? "{$tooLong} keywords longer than 255 characters skipped." : null,
+                        $tooLong ? Text::count($tooLong, 'keyword') . ' longer than 255 characters skipped.' : null,
                         $invalid ? "{$invalid} rows could not be read (unsupported text encoding)." : null,
                         $overLimit ? "Only the first {$result['created']} new keywords were imported because of the keyword limit; {$overLimit} were left out." : null,
                     ])->filter()->implode(' ') ?: null)

@@ -6,6 +6,7 @@ use Illuminate\Console\Command;
 use IsrarMinhas\FilamentAiVisibility\Models\Brand;
 use IsrarMinhas\FilamentAiVisibility\Runs\Redetector;
 use IsrarMinhas\FilamentAiVisibility\Support\Tenancy;
+use IsrarMinhas\FilamentAiVisibility\Support\Text;
 
 /**
  * Re-checks stored answers with the current brand and competitor names.
@@ -26,7 +27,7 @@ class RedetectCommand extends Command
         foreach ($brands as $brand) {
             $changed = Tenancy::as($brand->tenant_id, fn () => $redetector->brand($brand));
 
-            $this->components->twoColumnDetail($brand->name, "{$changed} answers changed");
+            $this->components->twoColumnDetail($brand->name, Text::count($changed, 'answer') . ' changed');
         }
 
         if ($brands->isEmpty()) {

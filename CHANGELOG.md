@@ -1,5 +1,19 @@
 # Changelog
 
+## v1.2.0 — 2026-09-27
+
+### Added
+
+- **Suggest with AI** on a brand's Competitors tab, not only in the setup wizard. The suggestions come with a reason each; untick or correct any before adding. Added competitors are marked "suggested".
+- **Fill in from website** on the brand form. It reads the name and description from the brand's first website, like the setup wizard does.
+
+### Improved
+
+- Competitor classification also uses the titles of a site's pages that AI answers cited. Sites that block bots and are never named in the text used to be labelled "unrelated" for lack of evidence (in testing, RealSelf went from "unrelated, low" to "marketplace, high"). The evidence panel shows these pages.
+- The classifier may use what it reliably knows about a well-known company when the evidence is thin, and keeps "unrelated" for sites that really have nothing to do with the brand's market. If you replaced the classification instructions in Settings, compare them with the new default.
+- Names read from a website drop a tagline in the site name ("Dr. John Mesa, MD | Plastic Surgery" becomes "Dr. John Mesa") and professional letters after a comma (MD, DDS, PhD, Esq, PC, PLLC…), keeping the full form as another name.
+- Counts read naturally everywhere ("1 answer", "1 prompt suggested", "Added 1 keyword").
+
 ## v1.1.1 — 2026-09-27
 
 Fixes from an end-to-end run on two real brands with all seven engines.

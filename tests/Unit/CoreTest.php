@@ -214,3 +214,13 @@ it('reads website basics', function () {
         'language' => 'en-GB',
     ]);
 });
+
+it('takes the name from the site name without its tagline or professional letters', function () {
+    $profile = app(WebsiteProfile::class)->parse('<html><head><title>Plastic Surgeon New York City</title><meta property="og:site_name" content="Dr. John Mesa, MD | Plastic Surgery"></head></html>');
+
+    expect($profile['name'])->toBe('Dr. John Mesa, MD')
+        ->and(WebsiteProfile::withoutLegalSuffix('Dr. John Mesa, MD'))->toBe('Dr. John Mesa')
+        ->and(WebsiteProfile::withoutLegalSuffix('Roe & Partners, P.C.'))->toBe('Roe & Partners')
+        ->and(WebsiteProfile::withoutLegalSuffix('Studio Do'))->toBe('Studio Do')
+        ->and(WebsiteProfile::withoutLegalSuffix('Nintendo Co., Ltd.'))->toBe('Nintendo');
+});

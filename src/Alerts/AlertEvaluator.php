@@ -24,6 +24,7 @@ use IsrarMinhas\FilamentAiVisibility\Reports\ReportFilters;
 use IsrarMinhas\FilamentAiVisibility\Support\Alerts\Alert;
 use IsrarMinhas\FilamentAiVisibility\Support\Alerts\AlertNotifier;
 use IsrarMinhas\FilamentAiVisibility\Support\Spend;
+use IsrarMinhas\FilamentAiVisibility\Support\Text;
 
 /**
  * Checks alert rules and sends what they find. A rule fires once per
@@ -234,7 +235,7 @@ class AlertEvaluator
         return [
             'fingerprint' => 'candidates:' . $candidates->max('id'),
             'title' => "{$brand->name}: " . $candidates->count() . ' new direct competitor' . ($candidates->count() > 1 ? 's' : '') . ' found',
-            'body' => $candidates->take(5)->map(fn (Candidate $c) => "{$c->name} (in {$c->answers} answers)")->implode(', ') . '. Review them on the Discovered screen.',
+            'body' => $candidates->take(5)->map(fn (Candidate $c) => "{$c->name} (in " . Text::count((int) $c->answers, 'answer') . ')')->implode(', ') . '. Review them on the Discovered screen.',
             'url' => AiVisibilityPlugin::pageUrl(CandidateResource::class),
             'payload' => ['candidates' => $candidates->pluck('id')->all()],
         ];
@@ -343,7 +344,7 @@ class AlertEvaluator
         return [
             'fingerprint' => 'run:' . $run->getKey(),
             'title' => "Run for {$run->brand?->name}: {$run->status->getLabel()}",
-            'body' => "{$run->results_done} answers collected, {$run->results_failed} failed and {$run->results_skipped} skipped of {$run->results_total}.",
+            'body' => Text::count($run->results_done, 'answer') . " collected, {$run->results_failed} failed and {$run->results_skipped} skipped of {$run->results_total}.",
             'level' => 'danger',
             'url' => AiVisibilityPlugin::pageUrl(RunResource::class, 'view', ['record' => $run]),
         ];

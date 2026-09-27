@@ -185,11 +185,13 @@ After each run, AI Visibility looks for companies the AI engines mention alongsi
 1. **Names**: company and product names in the answers, even without a link (one AI helper call per ~8 answers; can be turned off).
 2. **Sites**: every cited domain that isn't yours or a tracked competitor. Search engines and link shorteners are ignored, and you can add your own exclusions. A name and its domain ("Globex" and globex.io) become one candidate.
 3. **Score** (0–100): how many answers, prompts and engines it appears in, how early it's named, and how recently.
-4. **Classify**: the top candidates (25 per brand by default) are labelled from **evidence**: their homepage and about page, and the sentences the answers used to describe them. The labels are direct competitor, indirect competitor, marketplace, review/comparison, media, forum, directory, related tool, supplier/partner, your own property, or unrelated, each with a confidence and a reason.
+4. **Classify**: the top candidates (25 per brand by default) are labelled from **evidence**: their homepage and about page, the sentences the answers used to describe them, and the titles of their pages the answers cited (often the only evidence for sites that block bots). When the evidence is thin, the AI may use what it reliably knows about a well-known company. The labels are direct competitor, indirect competitor, marketplace, review/comparison, media, forum, directory, related tool, supplier/partner, your own property, or unrelated, each with a confidence and a reason.
 
 The **Discovered** screen lists them by score. **Track** turns a candidate into a competitor and updates past answers, so it shows up in share of voice straight away. You can also mark candidates as **Not a competitor**, **Ignore forever**, or **Change label**. Label corrections are shown to the classifier as examples next time, so it learns what you mean. Labels also categorise sources (a site labelled "review/comparison" counts as a review source in the Sources report).
 
-The setup wizard can **Suggest competitors** for a new brand, and **Settings → AI instructions** lets you replace the instructions used for classification, name extraction and suggestions.
+**Suggest with AI** (in the setup wizard, and on a brand's **Competitors** tab) asks your AI helper for direct competitors. You see the list with a reason for each, untick or correct any, and only the ones you keep are added. **Settings → AI instructions** lets you replace the instructions used for classification, name extraction and suggestions.
+
+A new brand's form has **Fill in from website** next to its websites: it reads the name and description from the site (dropping legal suffixes and letters such as "MD", which are kept as another name). Only empty fields are filled.
 
 ## Alerts
 

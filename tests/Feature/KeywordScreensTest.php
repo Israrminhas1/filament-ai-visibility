@@ -116,7 +116,7 @@ describe('generation screens', function () {
 
         livewire(ManagePrompts::class)
             ->callAction('generatePrompts', ['brand_id' => $this->brand->id, 'count' => 5, 'intents' => ['discovery'], 'use_keywords' => true])
-            ->assertNotified('1 prompts suggested for Acme');
+            ->assertNotified('1 prompt suggested for Acme');
 
         expect(Prompt::query()->where('status', PromptStatus::Suggested)->count())->toBe(1);
     });
@@ -146,7 +146,7 @@ describe('generation screens', function () {
                 return [];
             })
             ->callMountedAction()
-            ->assertNotified('1 prompts assigned to 1 topics');
+            ->assertNotified('1 prompt assigned to 1 topic');
 
         expect($prompt->fresh()->topic->name)->toBe('Pricing');
     })->skip(fn () => ! method_exists(\Filament\Actions\Testing\TestAction::class, 'table'), 'Needs Filament 4+');
@@ -161,7 +161,7 @@ describe('generation screens', function () {
 
         $component = livewire(Setup::class)
             ->callAction(TestAction::make('generatePrompts')->schemaComponent('promptActions', schema: 'form'))
-            ->assertNotified('Added 1 questions');
+            ->assertNotified('Added 1 question');
 
         // Added as rows below what was already typed, without saving anything yet.
         expect(collect($component->get('data.prompts'))->pluck('text')->filter()->values()->all())->toBe(['Which CRM integrates best with Slack?'])

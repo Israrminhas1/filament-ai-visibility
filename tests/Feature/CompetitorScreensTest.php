@@ -7,7 +7,9 @@ use IsrarMinhas\FilamentAiVisibility\Engines\KeyResolver;
 use IsrarMinhas\FilamentAiVisibility\Enums\CompetitorLabel;
 use IsrarMinhas\FilamentAiVisibility\Filament\Pages\ManageSettings;
 use IsrarMinhas\FilamentAiVisibility\Filament\Pages\Setup;
+use IsrarMinhas\FilamentAiVisibility\Filament\Resources\BrandResource\Pages\CreateBrand;
 use IsrarMinhas\FilamentAiVisibility\Filament\Resources\BrandResource\Pages\EditBrand;
+use IsrarMinhas\FilamentAiVisibility\Filament\Resources\BrandResource\RelationManagers\CompetitorsRelationManager;
 use IsrarMinhas\FilamentAiVisibility\Filament\Resources\CandidateResource;
 use IsrarMinhas\FilamentAiVisibility\Filament\Resources\CandidateResource\Pages\ListCandidates;
 use IsrarMinhas\FilamentAiVisibility\Jobs\ClassifyCandidatesJob;
@@ -157,6 +159,39 @@ it('suggests competitors in the setup wizard', function () {
         ->assertNotified('Added 2 suggestions');
 
     expect(collect($component->get('data.competitors'))->pluck('name')->values()->all())->toBe(['Globex', 'Hooli']);
+})->skip(fn () => ! method_exists(TestAction::class, 'schemaComponent'), 'Needs schema component action testing');
+
+it('suggests competitors on the brand page, adding only the ones picked', function () {
+    app(KeyResolver::class)->store('openai', 'sk');
+    Http::fake(['api.openai.com/*' => Http::response([
+        'output' => [['type' => 'message', 'content' => [['type' => 'output_text', 'text' => '{"competitors":[{"name":"Globex","domain":"globex.io","reason":"Same CRM"},{"name":"Hooli","domain":"hooli.com"}]}']]]],
+        'usage' => [],
+    ])]);
+
+    $component = livewire(CompetitorsRelationManager::class, ['ownerRecord' => $this->brand, 'pageClass' => EditBrand::class])
+        ->mountAction(TestAction::make('suggestCompetitors')->table());
+
+    $rows = $component->get('mountedActions.0.data.suggestions');
+
+    expect(collect($rows)->pluck('name')->values()->all())->toBe(['Globex', 'Hooli']);
+
+    $component
+        ->fillForm(['suggestions' => collect($rows)->map(fn ($row) => [...$row, 'add' => $row['name'] === 'Hooli'])->all()])
+        ->callMountedAction()
+        ->assertNotified('Added 1 competitor');
+
+    $competitor = $this->brand->competitors()->sole();
+
+    expect([$competitor->name, $competitor->domains, $competitor->source])->toBe(['Hooli', ['hooli.com'], 'suggested']);
+});
+
+it('fills a new brand in from its website', function () {
+    Http::fake(['nintendo.com' => Http::response('<html><head><meta property="og:site_name" content="Nintendo Co., Ltd."><meta name="description" content="Games and consoles."></head></html>', 200, ['Content-Type' => 'text/html'])]);
+
+    livewire(CreateBrand::class)
+        ->fillForm(['domains' => ['nintendo.com']])
+        ->callAction(TestAction::make('fetchWebsite')->schemaComponent('domains'))
+        ->assertSchemaStateSet(['name' => 'Nintendo', 'aliases' => ['Nintendo Co., Ltd.'], 'description' => 'Games and consoles.']);
 })->skip(fn () => ! method_exists(TestAction::class, 'schemaComponent'), 'Needs schema component action testing');
 
 it('saves discovery settings and custom instructions', function () {

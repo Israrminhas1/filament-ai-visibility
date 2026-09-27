@@ -93,10 +93,11 @@ class Instructions
                 {labels}
 
                 RULES
-                - Judge only from the evidence given for each candidate (its website text or the sentences it was mentioned in). Never guess from the name or domain alone.
+                - Judge from the evidence given for each candidate: its website text, the sentences it was mentioned in, and the titles of its pages that AI assistants cited.
+                - If that evidence is thin but you reliably know the company or site, use that knowledge and say so in the reason. Never guess from the name or domain alone when you don't know it.
                 - "direct_competitor": a typical customer of the brand could realistically choose it INSTEAD of the brand for the same core need. Large or broad companies count if they sell the same core offering.
                 - Sites that mainly review, compare, list, discuss or report are not competitors, even if they mention competitors.
-                - If the evidence is thin or unclear, pick the most likely label with confidence "low".
+                - Use "unrelated" only when the evidence shows it has nothing to do with the brand's market. A site cited in answers about the brand's market usually is related: if you can't tell how, pick the most likely label with confidence "low".
                 - company_name is the company or product name as people know it.
 
                 {examples}

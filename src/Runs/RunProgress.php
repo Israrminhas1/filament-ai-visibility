@@ -12,6 +12,7 @@ use IsrarMinhas\FilamentAiVisibility\Events\RunCompleted;
 use IsrarMinhas\FilamentAiVisibility\Filament\Resources\RunResource;
 use IsrarMinhas\FilamentAiVisibility\Models\Result;
 use IsrarMinhas\FilamentAiVisibility\Models\Run;
+use IsrarMinhas\FilamentAiVisibility\Support\Text;
 use Throwable;
 
 /**
@@ -231,7 +232,7 @@ class RunProgress
 
             $notification = Notification::make()
                 ->title("Run for {$run->brand?->name}: {$run->status->getLabel()}")
-                ->body("{$run->results_done} answers collected, brand mentioned in " . round($visible / $done * 100) . '%.' . ($run->results_skipped ? " {$run->results_skipped} skipped." : ''))
+                ->body(Text::count($run->results_done, 'answer') . ' collected, brand mentioned in ' . round($visible / $done * 100) . '%.' . ($run->results_skipped ? " {$run->results_skipped} skipped." : ''))
                 ->status($run->status === RunStatus::Completed ? 'success' : 'warning');
 
             if ($url = AiVisibilityPlugin::pageUrl(RunResource::class, 'view', ['record' => $run])) {

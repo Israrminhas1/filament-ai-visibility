@@ -11,6 +11,7 @@ use IsrarMinhas\FilamentAiVisibility\Runs\RunSweeper;
 use IsrarMinhas\FilamentAiVisibility\Support\Settings;
 use IsrarMinhas\FilamentAiVisibility\Support\Spend;
 use IsrarMinhas\FilamentAiVisibility\Support\Tenancy;
+use IsrarMinhas\FilamentAiVisibility\Support\Text;
 use Throwable;
 
 class RunCommand extends Command
@@ -70,7 +71,7 @@ class RunCommand extends Command
                 }
             });
 
-        $this->components->info("Started {$started} runs.");
+        $this->components->info('Started ' . Text::count($started, 'run') . '.');
 
         return self::SUCCESS;
     }

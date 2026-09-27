@@ -10,6 +10,7 @@ use IsrarMinhas\FilamentAiVisibility\Enums\CompetitorLabel;
 use IsrarMinhas\FilamentAiVisibility\Events\CandidateClassified;
 use IsrarMinhas\FilamentAiVisibility\Models\Brand;
 use IsrarMinhas\FilamentAiVisibility\Models\Candidate;
+use IsrarMinhas\FilamentAiVisibility\Models\Citation;
 use IsrarMinhas\FilamentAiVisibility\Models\Classification;
 use IsrarMinhas\FilamentAiVisibility\Models\Model;
 use IsrarMinhas\FilamentAiVisibility\Models\ResultMention;
@@ -241,7 +242,26 @@ class Classifier
             ->pluck('snippet')
             ->all();
 
-        return $evidence;
+        // The site's pages the AI answers cited: often the only evidence for a site
+        // that blocks bots and is never named in the text.
+        if ($candidate->domain) {
+            $evidence['cited_pages'] = Citation::query()
+                ->whereIn('result_id', $candidate->brand->results()->select(Model::prefixedTable('results') . '.id'))
+                ->where('domain', $candidate->domain)
+                ->latest('id')
+                ->limit(20)
+                ->get(['url', 'title'])
+                ->unique('url')
+                ->take(5)
+                // Some engines give the URL as the title; don't repeat it.
+                ->map(fn (Citation $citation) => filled($citation->title) && $citation->title !== $citation->url
+                    ? $citation->title . ' — ' . $citation->url
+                    : $citation->url)
+                ->values()
+                ->all();
+        }
+
+        return array_filter($evidence, fn ($value) => $value !== []);
     }
 
     /**
@@ -262,6 +282,10 @@ class Classifier
 
         if ($evidence['mentions'] ?? []) {
             $lines[] = 'mentioned as: ' . implode(' | ', $evidence['mentions']);
+        }
+
+        if ($evidence['cited_pages'] ?? []) {
+            $lines[] = 'pages cited in answers: ' . implode(' | ', $evidence['cited_pages']);
         }
 
         return implode("\n", $lines);
