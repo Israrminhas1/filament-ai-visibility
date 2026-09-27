@@ -679,7 +679,8 @@ class Setup extends Page
     {
         $rows = $brand
             ? $brand->prompts()
-                ->where(fn ($query) => $query->where('status', PromptStatus::Active)->orWhereKey($this->pausedPromptIds))
+                // orWhereIn rather than orWhereKey, which only exists from Laravel 13.
+                ->where(fn ($query) => $query->where('status', PromptStatus::Active)->orWhereIn($query->getModel()->getQualifiedKeyName(), $this->pausedPromptIds))
                 ->orderBy('id')
                 ->get(['id', 'text', 'status'])
                 ->map(fn ($prompt) => ['id' => $prompt->getKey(), 'text' => $prompt->text, 'paused' => $prompt->status !== PromptStatus::Active])

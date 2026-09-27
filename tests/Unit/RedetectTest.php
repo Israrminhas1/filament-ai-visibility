@@ -64,7 +64,11 @@ it('re-checks past answers when the brand or its competitors change', function (
     $this->brand->update(['aliases' => ['Switch']]);
     Queue::assertPushed(RedetectBrandJob::class, fn ($job) => $job->brandId === $this->brand->id);
 
+    // The first job's uniqueness lock would still hold (it is never processed here), and
+    // Laravel 11's fake respects it; release it as a worker would.
     Queue::fake();
+    (new \Illuminate\Bus\UniqueLock(app(\Illuminate\Contracts\Cache\Repository::class)))
+        ->release(new RedetectBrandJob($this->brand->id, $this->brand->tenant_id));
     $this->brand->update(['description' => 'Games']);
     Queue::assertNotPushed(RedetectBrandJob::class);
 
