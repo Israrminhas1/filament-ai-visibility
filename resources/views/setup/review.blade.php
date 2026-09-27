@@ -5,7 +5,7 @@
     <div><strong>Competitors:</strong> {{ $competitors }}</div>
     <div><strong>Keywords:</strong> {{ $keywords }}</div>
     <div><strong>Runs:</strong> {{ $frequency }}</div>
-    <div><strong>Estimated cost:</strong> {{ $monthly }} per month @if ($budget) (budget ${{ number_format((float) $budget, 2) }}) @endif</div>
+    <div><strong>Estimated cost:</strong> @if ($manual) {{ $perRun }} per run (manual runs) @else {{ $monthly }} per month @endif @if ($budget) (budget ${{ number_format((float) $budget, 2) }}) @endif</div>
 
     <div style="margin-top: 0.5rem; opacity: 0.8;">
         Click "Finish setup" to start. You can change everything later in Settings and on each brand.

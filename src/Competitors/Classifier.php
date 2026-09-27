@@ -66,7 +66,7 @@ class Classifier
     {
         $staleBefore = now()->subDays((int) $this->settings->get('discovery.reclassify_days', 90));
         // A failed attempt leaves the candidate "new" with classified_at set; wait before trying again.
-        $retryBefore = now()->subDays((int) config('ai-visibility.discovery.retry_failed_days', 7));
+        $retryBefore = now()->subDays((int) config('ai-visibility.discovery.retry_failed_days', 1));
         $topN = (int) $this->settings->get('discovery.top_n', 25);
 
         return Candidate::query()

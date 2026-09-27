@@ -319,7 +319,7 @@ return [
         // Failed attempts before an answer's analysis is marked failed.
         'analysis_attempts' => 3,
         // Days before retrying a candidate the AI could not label.
-        'retry_failed_days' => 7,
+        'retry_failed_days' => 1,
         // How candidates are scored (0–100). Weights are relative.
         'weights' => [
             'answers' => 0.35,
@@ -515,6 +515,8 @@ return [
     */
     'http' => [
         'timeout' => 60,
+        // Extra attempts when a connection drops or times out before a response.
+        'connect_retries' => 2,
         'website_fetch_timeout' => 10,
         'user_agent' => 'Mozilla/5.0 (compatible; FilamentAiVisibility/1.0; +https://github.com/Israrminhas1/filament-ai-visibility)',
     ],

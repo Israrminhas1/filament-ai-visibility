@@ -146,3 +146,20 @@ it('tests SerpAPI keys against the account endpoint', function () {
         ->and($engine->testKey('k')->reason)->toBe(PauseReason::InsufficientCredits)
         ->and($engine->testKey('k')->reason)->toBe(PauseReason::InvalidKey);
 });
+
+it('reads the real site behind Google redirect links and cleans SerpAPI text', function () {
+    expect(SerpApiGoogleEngine::sourceUrl(['link' => 'https://linear.app/ai']))->toBe('https://linear.app/ai')
+        ->and(SerpApiGoogleEngine::sourceUrl([
+            'link' => 'https://www.google.com/goto?url=CAESlAEB6zsw',
+            'source_icon' => 'https://encrypted-tbn0.gstatic.com/faviconV2?url=https://www.atlassian.com&client=AIM&size=128',
+        ]))->toBe('https://www.atlassian.com/')
+        ->and(SerpApiGoogleEngine::sourceUrl(['link' => 'https://www.google.com/goto?url=abc']))->toBeNull()
+        ->and(SerpApiGoogleEngine::clean('Compared & Reviewed, built\-in agents \(beta\)'))->toBe('Compared & Reviewed, built-in agents (beta)')
+        ->and(SerpApiGoogleEngine::clean('**bold** and \*not bold\*'))->toBe('**bold** and \*not bold\*');
+});
+
+it('shows mention snippets from tables and escaped markdown as plain text', function () {
+    expect(\IsrarMinhas\FilamentAiVisibility\Filament\Resources\ResultResource::plainText('| Azure DevOps | Power Platform | Autonomously parses \(emails\) |'))
+        ->toBe('Azure DevOps · Power Platform · Autonomously parses (emails)')
+        ->and(\IsrarMinhas\FilamentAiVisibility\Filament\Resources\ResultResource::plainText('| --- | --- |'))->toBe('');
+});

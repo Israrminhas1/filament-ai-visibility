@@ -325,10 +325,12 @@ class Setup extends Page
         $perRun = CostEstimator::costPerRun($prompts, $engines, $samples);
         $monthly = CostEstimator::monthly($prompts, $engines, $samples, $frequency);
 
+        $manual = $frequency === RunFrequency::Manual->value || $frequency === RunFrequency::Manual;
+
         return sprintf(
-            'About %s per run and %s per month for %d prompts × %d engine(s) × %d sample(s). This is a rough estimate; real costs are measured once runs start.',
+            'About %s per run%s for %d prompts × %d engine(s) × %d sample(s). This is a rough estimate; real costs are measured once runs start.',
             CostEstimator::format($perRun),
-            $frequency === RunFrequency::Manual->value || $frequency === RunFrequency::Manual ? '(manual runs only)' : CostEstimator::format($monthly),
+            $manual ? ' (runs only start when you click Run now)' : ' and ' . CostEstimator::format($monthly) . ' per month',
             $prompts,
             count($engines),
             $samples,
@@ -547,6 +549,7 @@ class Setup extends Page
             ->schema([
                 Text::make('Optional. Paste the search keywords that matter to you, one per line. They are used to generate realistic prompts. You can also connect keyword sources later.'),
                 Textarea::make('keywords_text')
+                    ->label('Keywords')
                     ->hiddenLabel()
                     ->rows(8)
                     ->placeholder("crm for agencies\nbest crm small business\nhubspot alternatives"),
@@ -875,6 +878,8 @@ class Setup extends Page
             'competitors' => $brand?->competitors()->count() ?? 0,
             'keywords' => $brand?->keywords()->count() ?? 0,
             'frequency' => RunFrequency::tryFrom((string) $frequency)?->getLabel() ?? $frequency,
+            'manual' => $frequency === RunFrequency::Manual->value,
+            'perRun' => CostEstimator::format(CostEstimator::costPerRun($prompts, $engines, $samples)),
             'monthly' => CostEstimator::format(CostEstimator::monthly($prompts, $engines, $samples, $frequency)),
             'budget' => app(Settings::class)->get('budget.monthly_usd'),
         ];
@@ -889,7 +894,9 @@ class Setup extends Page
 
         Notification::make()
             ->title('Setup complete')
-            ->body('Tracking starts on the schedule you chose.')
+            ->body(app(Settings::class)->get('runs.frequency') === RunFrequency::Manual->value
+                ? 'Runs start when you click Run now.'
+                : 'Tracking starts on the schedule you chose.')
             ->success()
             ->send();
 

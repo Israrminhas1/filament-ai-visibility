@@ -57,7 +57,7 @@ abstract class SerpApiGoogleEngine implements Engine
     public function testKey(string $apiKey): KeyTestResult
     {
         try {
-            $response = Http::timeout(20)->get('https://serpapi.com/account.json', ['api_key' => $apiKey]);
+            $response = Http::timeout(20)->retry(...HttpEngine::connectRetry())->get('https://serpapi.com/account.json', ['api_key' => $apiKey]);
         } catch (ConnectionException) {
             return KeyTestResult::failed(PauseReason::ProviderOutage, 'could not reach SerpAPI');
         } catch (Throwable $e) {
@@ -87,6 +87,7 @@ abstract class SerpApiGoogleEngine implements Engine
     {
         try {
             $response = Http::timeout((int) config('ai-visibility.http.timeout', 60))
+                ->retry(...HttpEngine::connectRetry())
                 ->get('https://serpapi.com/search.json', array_filter([...$params, 'api_key' => $apiKey], fn ($v) => $v !== null));
         } catch (ConnectionException $e) {
             // The key is a query parameter, so connection errors quote it in the URL.
@@ -173,13 +174,50 @@ abstract class SerpApiGoogleEngine implements Engine
     protected function citations(array $references): array
     {
         return EngineResponse::uniqueCitations(array_map(
-            fn ($ref) => ['url' => $ref['link'] ?? null, 'title' => $ref['title'] ?? ($ref['source'] ?? null)],
+            fn ($ref) => [
+                'url' => static::sourceUrl($ref),
+                'title' => static::clean((string) ($ref['title'] ?? ($ref['source'] ?? ''))) ?: null,
+            ],
             $references,
         ));
     }
 
+    /**
+     * The real address of a reference. Google sometimes gives an opaque
+     * "google.com/goto?url=…" link; the site is then read from the favicon URL.
+     *
+     * @param  array<string, mixed>  $ref
+     */
+    public static function sourceUrl(array $ref): ?string
+    {
+        $link = (string) ($ref['link'] ?? '');
+
+        if ($link !== '' && ! preg_match('#^https?://(www\.)?google\.[a-z.]+/(goto|url)\b#i', $link)) {
+            return $link;
+        }
+
+        parse_str((string) parse_url((string) ($ref['source_icon'] ?? ''), PHP_URL_QUERY), $query);
+        $site = (string) ($query['url'] ?? '');
+
+        return preg_match('#^https?://[^/]+#i', $site, $match) ? $match[0] . '/' : null;
+    }
+
+    /**
+     * SerpAPI text can carry literal "&" sequences and needless markdown
+     * escapes ("built\-in"); turn them back into plain characters.
+     */
+    public static function clean(string $text): string
+    {
+        $text = (string) preg_replace_callback('/\\\\u([0-9a-fA-F]{4})/', fn ($m) => mb_chr(hexdec($m[1]), 'UTF-8'), $text);
+
+        // Only escapes that can't change the markdown when removed.
+        return (string) preg_replace('/\\\\([\-().!#+\'"&])/', '$1', $text);
+    }
+
     protected function answer(string $text, array $references, EngineRequest $request, int $searches): EngineResponse
     {
+        $text = static::clean($text);
+
         return new EngineResponse(
             answer: $text !== '' ? $text : static::NO_ANSWER,
             citations: $this->citations($references),

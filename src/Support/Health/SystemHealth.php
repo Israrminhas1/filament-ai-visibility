@@ -134,7 +134,7 @@ class SystemHealth
         $critical = (int) config('ai-visibility.health.queue_critical_after', 60);
         $fix = "Start a worker for the \"{$queue}\" queue and keep it running (e.g. with Supervisor): php artisan queue:work --queue={$queue} --timeout=930";
         $waiting = $this->waiting($queue);
-        $backlog = $waiting > 0 ? " {$waiting} jobs waiting." : '';
+        $backlog = $waiting > 0 ? ' ' . $waiting . ' ' . str('job')->plural($waiting) . ' waiting.' : '';
 
         if (! $lastBeat) {
             return new CheckResult($key, $label, CheckResult::FAILED, 'No queue worker has processed an AI Visibility job on this queue yet.' . $backlog, $fix, blocking: true);

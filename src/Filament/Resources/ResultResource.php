@@ -111,6 +111,12 @@ class ResultResource extends Resource
         $text = (string) preg_replace('/(\*\*|__|~~|`+)/u', '', $text);
         $text = (string) preg_replace('/(?<![\p{L}\p{N}])[*_](\S[^*_]*?)[*_](?![\p{L}\p{N}])/u', '$1', $text);
         $text = (string) preg_replace('/(^|\s)#{1,6}\s+/u', '$1', $text);
+        // Markdown escapes ("built\-in") and literal "&" sequences.
+        $text = (string) preg_replace_callback('/\\\\u([0-9a-fA-F]{4})/', fn ($m) => mb_chr(hexdec($m[1]), 'UTF-8'), $text);
+        $text = (string) preg_replace('/\\\\([\\\\`*_{}\[\]()#+\-.!|&\'"])/u', '$1', $text);
+        // Table rows ("| Azure DevOps | Power Platform |") read as a list; divider rows vanish.
+        $text = (string) preg_replace('/\|?\s*:?-{3,}:?\s*(\|\s*:?-{3,}:?\s*)*\|?/u', ' ', $text);
+        $text = trim((string) preg_replace('/\s*\|\s*/u', ' · ', $text), " ·\t\n\r");
 
         return trim((string) preg_replace('/\s+/u', ' ', $text));
     }
@@ -135,7 +141,8 @@ class ResultResource extends Resource
             ->map(fn (ResultMention $mention) => [
                 'type' => $mention->subject_type,
                 'name' => $mention->subject_type === 'entity' ? $mention->name_matched : $mention->label(),
-                'position' => $mention->position,
+                // Only the brand and competitors are ranked; other names are listed after them.
+                'position' => $mention->subject_type === 'entity' ? null : $mention->position,
                 'count' => (int) $mention->count,
                 'snippet' => filled($mention->snippet) ? static::plainText($mention->snippet) : null,
                 'sentiment' => Sentiment::tryFrom((string) $mention->sentiment),

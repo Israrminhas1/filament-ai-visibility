@@ -31,7 +31,7 @@ class RedirectToSetup
 
         $plugin = AiVisibilityPlugin::current();
 
-        // This runs before the panel's auth middleware: guests go on to the login redirect.
+        // Guests go on to the panel's login redirect.
         if (! $plugin?->hasSetupWizard() || ! $this->isLoggedIn()) {
             return $next($request);
         }

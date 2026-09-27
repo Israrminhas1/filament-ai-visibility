@@ -78,6 +78,7 @@ class OpenAiEngine extends HttpEngine implements SupportsBatches
 
         // A multipart upload, so not the JSON client (its Content-Type header would stick).
         $file = $this->send(fn () => Http::timeout((int) config('ai-visibility.http.timeout', 60))
+            ->retry(...static::connectRetry())
             ->acceptJson()
             ->baseUrl('https://api.openai.com/v1')
             ->withToken($apiKey)

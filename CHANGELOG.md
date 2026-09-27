@@ -1,5 +1,18 @@
 # Changelog
 
+## v1.0.5 — 2026-09-27
+
+Fixes from an end-to-end run with live API keys.
+
+- Fixed: the redirect to the setup wizard never fired in a real browser, because it ran before the session had started. It now runs with the panel's auth middleware.
+- Requests that fail to connect (for example a TLS timeout) are retried twice before failing. Set `http.connect_retries` in the config to change this.
+- Fixed: helper features on Gemini sometimes returned cut-off JSON, because thinking used up the output limit. Gemini now gets extra room for thinking (`engines.gemini.thinking_headroom`, 8192 tokens by default); only tokens actually used are billed.
+- Competitor candidates that could not be classified are retried after 1 day instead of 7.
+- Google AI Overview and AI Mode: sources shown as `google.com/goto` links now point to the real site, and escaped characters (`built\-in`, `&`) are cleaned from answers and titles.
+- Answer page: mentions found through entity detection no longer show a made-up position, and snippets from tables read as plain text.
+- Setup: the cost estimate and review step make sense for manual runs, and the finish message no longer mentions a schedule when there is none.
+- Brand settings list engines by name, and the health check says "1 job waiting" rather than "1 jobs waiting".
+
 ## v1.0.4 — 2026-09-27
 
 - Google Search Console: the property is found automatically from the brand's domain (a domain property such as `sc-domain:acme.com` first, then `https://www.acme.com/`), so it no longer has to be typed in. When nothing matches, the error names the exact service-account email to add in Search Console.

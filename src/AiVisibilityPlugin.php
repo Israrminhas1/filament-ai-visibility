@@ -420,10 +420,13 @@ class AiVisibilityPlugin implements Plugin
             Health::class => $this->screens['health'],
         ]));
 
+        // Auth middleware, not panel middleware: plugins are usually registered before the
+        // panel's ->middleware([... StartSession ...]) call, and plain middleware added here
+        // would run before the session starts, so every user would look logged out.
         $panel
             ->resources($resources)
             ->pages($pages)
-            ->middleware([RedirectToSetup::class]);
+            ->authMiddleware([RedirectToSetup::class]);
 
         $this->applyRegistrations();
     }

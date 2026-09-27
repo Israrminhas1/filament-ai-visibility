@@ -224,11 +224,29 @@ abstract class HttpEngine implements Engine
         return str($message)->limit(200)->toString();
     }
 
+    /**
+     * Retry settings for dropped connections (timeouts, resets), which are common
+     * enough to fail a request now and then. Error responses are not retried here:
+     * those are classified and handled by the engine state.
+     *
+     * @return array{0: int, 1: int, 2: \Closure, 3: bool}
+     */
+    public static function connectRetry(): array
+    {
+        return [
+            1 + max(0, (int) config('ai-visibility.http.connect_retries', 2)),
+            1000,
+            fn ($exception) => $exception instanceof ConnectionException,
+            false,
+        ];
+    }
+
     protected function client(): PendingRequest
     {
         return Http::timeout(config('ai-visibility.http.timeout', 60))
             ->acceptJson()
-            ->asJson();
+            ->asJson()
+            ->retry(...static::connectRetry());
     }
 
     public function complete(CompletionRequest $request): CompletionResponse

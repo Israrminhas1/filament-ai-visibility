@@ -12,7 +12,7 @@
             @endphp
             <li style="display: grid; gap: 0.3rem;">
                 <div style="display: flex; flex-wrap: wrap; gap: 0.4rem; align-items: center;">
-                    <span style="font-variant-numeric: tabular-nums; opacity: 0.7; min-width: 1.75rem;">#{{ $mention['position'] }}</span>
+                    <span style="font-variant-numeric: tabular-nums; opacity: 0.7; min-width: 1.75rem;">{{ $mention['position'] ? '#' . $mention['position'] : '·' }}</span>
                     <span style="font-weight: {{ $mention['type'] === 'brand' ? 600 : 500 }};">{{ $mention['name'] }}</span>
                     <x-filament::badge size="sm" :color="$typeColor">{{ $typeLabel }}</x-filament::badge>
                     @if ($mention['count'] > 1)

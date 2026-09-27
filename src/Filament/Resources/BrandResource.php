@@ -110,7 +110,7 @@ class BrandResource extends Resource
                                         CheckboxList::make('settings.engines.enabled')
                                             ->label('Engines')
                                             ->options(fn () => app(EngineRegistry::class)->options())
-                                            ->helperText(fn () => 'Global: ' . (implode(', ', app(Settings::class)->get('engines.enabled', [])) ?: 'none'))
+                                            ->helperText(fn () => 'Global: ' . (collect(app(Settings::class)->get('engines.enabled', []))->map(fn ($key) => app(EngineRegistry::class)->options()[$key] ?? $key)->implode(', ') ?: 'none'))
                                             ->columnSpanFull(),
                                         TextInput::make('settings.runs.samples')
                                             ->label('Samples per prompt')

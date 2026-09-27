@@ -116,7 +116,9 @@ class GeminiEngine extends HttpEngine
         $body = [
             'contents' => [['role' => 'user', 'parts' => [['text' => $request->prompt]]]],
             'generationConfig' => array_filter([
-                'maxOutputTokens' => $request->maxTokens,
+                // Thinking counts towards Gemini's output limit: without extra room a long
+                // think leaves JSON cut off mid-way. Only tokens actually used are billed.
+                'maxOutputTokens' => $request->maxTokens + (int) config('ai-visibility.engines.gemini.thinking_headroom', 8192),
                 'responseMimeType' => $request->json ? 'application/json' : null,
             ]),
         ];

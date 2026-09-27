@@ -3,6 +3,7 @@
 use Illuminate\Support\Facades\Http;
 use IsrarMinhas\FilamentAiVisibility\Engines\KeyResolver;
 use IsrarMinhas\FilamentAiVisibility\Filament\Pages\Health;
+use IsrarMinhas\FilamentAiVisibility\Filament\Pages\Overview;
 use IsrarMinhas\FilamentAiVisibility\Filament\Pages\Setup;
 use IsrarMinhas\FilamentAiVisibility\Filament\Resources\BrandResource;
 use IsrarMinhas\FilamentAiVisibility\Models\Brand;
@@ -25,6 +26,17 @@ it('sends every AI Visibility screen to setup until it is complete', function ()
     $this->completeSetup();
 
     $this->get(BrandResource::getUrl())->assertOk();
+});
+
+it('checks setup after the session has started', function () {
+    // Plugins are usually registered before the panel's ->middleware([... StartSession ...])
+    // call. As plain panel middleware the setup check would run before the session starts,
+    // see every real browser as logged out, and never redirect. (actingAs() in the tests
+    // above sets the user without a session, so they can't catch that.)
+    $panel = \Filament\Facades\Filament::getPanel('console');
+
+    expect($panel->getAuthMiddleware())->toContain(\IsrarMinhas\FilamentAiVisibility\Http\Middleware\RedirectToSetup::class)
+        ->and($panel->getMiddleware())->not->toContain(\IsrarMinhas\FilamentAiVisibility\Http\Middleware\RedirectToSetup::class);
 });
 
 it('lives under the plugin prefix on a panel with any ID', function () {
