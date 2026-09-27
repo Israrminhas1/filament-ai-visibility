@@ -290,3 +290,53 @@ describe('reports', function () {
             ->and(app(Metrics::class)->topics($filters)->first())->toMatchArray(['name' => 'Pricing', 'prompts' => 1, 'answers' => 1, 'visibility' => 0.0]);
     });
 });
+
+describe('search console property', function () {
+    it('matches a brand to its Search Console property', function (array $domains, array $sites, ?string $expected) {
+        expect(\IsrarMinhas\FilamentAiVisibility\Keywords\Sources\GoogleSearchConsole::matchProperty($domains, $sites))->toBe($expected);
+    })->with([
+        'domain property first' => [['acme.com'], ['https://www.acme.com/', 'sc-domain:acme.com'], 'sc-domain:acme.com'],
+        'https www url property' => [['acme.com'], ['http://acme.com/', 'https://www.acme.com/', 'https://other.com/'], 'https://www.acme.com/'],
+        'site root before a folder' => [['acme.com'], ['https://acme.com/blog/', 'https://acme.com/'], 'https://acme.com/'],
+        'subdomain brand uses the parent domain property' => [['shop.acme.co.uk'], ['sc-domain:acme.co.uk'], 'sc-domain:acme.co.uk'],
+        'no property for the brand' => [['acme.com'], ['sc-domain:other.com', 'https://notacme.com/'], null],
+    ]);
+
+    it('finds the property from the brand domain when none is set, and remembers it', function () {
+        $key = openssl_pkey_new(array_filter(['private_key_bits' => 2048, 'config' => is_file($c = dirname(PHP_BINARY) . '/extras/ssl/openssl.cnf') ? $c : null]));
+        openssl_pkey_export($key, $pem, null, array_filter(['config' => is_file($c) ? $c : null]));
+        $connection = connect('gsc', ['service_account' => json_encode(['client_email' => 'bot@proj.iam.gserviceaccount.com', 'private_key' => $pem])], ['min_impressions' => 1], $this->brand);
+
+        Http::fake([
+            'oauth2.googleapis.com/token' => Http::response(['access_token' => 'ya29.token']),
+            'www.googleapis.com/webmasters/v3/sites' => Http::response(['siteEntry' => [['siteUrl' => 'sc-domain:other.com'], ['siteUrl' => 'https://www.acme.com/']]]),
+            'www.googleapis.com/webmasters/v3/sites/*' => Http::response(['rows' => [['keys' => ['crm for agencies'], 'clicks' => 2, 'impressions' => 50]]]),
+        ]);
+
+        $source = app(KeywordSourceRegistry::class)->get('gsc');
+
+        expect($source->test($connection)->message)->toBe('Connected. Using https://www.acme.com/.');
+
+        app(KeywordSync::class)->sync($connection);
+
+        expect($connection->fresh()->setting('property'))->toBe('https://www.acme.com/');
+        Http::assertSent(fn ($request) => str_contains($request->url(), rawurlencode('https://www.acme.com/') . '/searchAnalytics/query'));
+    });
+
+    it('says which email to add when the brand has no property yet', function () {
+        $key = openssl_pkey_new(array_filter(['private_key_bits' => 2048, 'config' => is_file($c = dirname(PHP_BINARY) . '/extras/ssl/openssl.cnf') ? $c : null]));
+        openssl_pkey_export($key, $pem, null, array_filter(['config' => is_file($c) ? $c : null]));
+        $connection = connect('gsc', ['service_account' => json_encode(['client_email' => 'bot@proj.iam.gserviceaccount.com', 'private_key' => $pem])], [], $this->brand);
+
+        Http::fake([
+            'oauth2.googleapis.com/token' => Http::response(['access_token' => 'ya29.token']),
+            'www.googleapis.com/webmasters/v3/sites' => Http::response(['siteEntry' => []]),
+        ]);
+
+        $result = app(KeywordSourceRegistry::class)->get('gsc')->test($connection);
+
+        expect($result->ok)->toBeFalse()
+            ->and($result->message)->toContain('No Search Console property for acme.com')
+            ->and($result->message)->toContain('add bot@proj.iam.gserviceaccount.com');
+    });
+});

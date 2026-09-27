@@ -1,5 +1,9 @@
 # Changelog
 
+## v1.0.4 — 2026-09-27
+
+- Google Search Console: the property is found automatically from the brand's domain (a domain property such as `sc-domain:acme.com` first, then `https://www.acme.com/`), so it no longer has to be typed in. When nothing matches, the error names the exact service-account email to add in Search Console.
+
 ## v1.0.3 — 2026-09-27
 
 - Gemini: only models that reliably search and return sources are offered (`gemini-3.5-flash`, now the default, `gemini-3.5-flash-lite`, `gemini-2.5-flash`). Tested against the live API: Gemini 3.8, 3.7 and 3.1 Pro often answered without searching, and `gemini-2.5-pro` is no longer available to new users.

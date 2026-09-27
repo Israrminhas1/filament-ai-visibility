@@ -6,6 +6,7 @@ use Filament\Forms\Components\Textarea;
 use Filament\Forms\Components\TextInput;
 use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Support\Facades\Http;
+use IsrarMinhas\FilamentAiVisibility\Detection\Domains;
 use IsrarMinhas\FilamentAiVisibility\Keywords\Contracts\KeywordSource;
 use IsrarMinhas\FilamentAiVisibility\Keywords\KeywordData;
 use IsrarMinhas\FilamentAiVisibility\Keywords\SourceFailed;
@@ -45,8 +46,8 @@ class GoogleSearchConsole implements KeywordSource
                 ->helperText('In Google Cloud: create a service account, enable the Search Console API, create a JSON key and paste it here. Then add the service account\'s email as a user of your Search Console property. Leave empty to keep the saved key.'),
             TextInput::make('config.property')
                 ->label('Search Console property')
-                ->placeholder('sc-domain:acme.com or https://www.acme.com/')
-                ->required(),
+                ->placeholder('Leave empty to use the brand\'s domain')
+                ->helperText('Found automatically from the brand\'s domain (e.g. sc-domain:acme.com or https://www.acme.com/). Fill it in only to use a different property.'),
             TextInput::make('config.min_impressions')
                 ->label('Minimum impressions')
                 ->numeric()
@@ -74,20 +75,116 @@ class GoogleSearchConsole implements KeywordSource
             return SourceTestResult::failed('Search Console: ' . ($response->json('error.message') ?? 'HTTP ' . $response->status()), in_array($response->status(), [401, 403], true));
         }
 
-        $property = (string) $connection->setting('property');
-        $sites = collect($response->json('siteEntry', []))->pluck('siteUrl');
+        $sites = collect($response->json('siteEntry', []))->pluck('siteUrl')->all();
 
-        if (! $sites->contains($property)) {
-            return SourceTestResult::failed("The service account can't see \"{$property}\". Add its email as a user of that property in Search Console." . ($sites->isNotEmpty() ? ' It can see: ' . $sites->implode(', ') : ''));
+        try {
+            $property = $this->resolveProperty($connection, $sites);
+        } catch (SourceFailed $e) {
+            return SourceTestResult::failed($e->getMessage());
         }
 
-        return SourceTestResult::ok('Connected.');
+        return SourceTestResult::ok("Connected. Using {$property}.");
+    }
+
+    /**
+     * The property to read: the one set on the connection, or the site in
+     * Search Console that matches the brand's domain.
+     *
+     * @param  array<string>  $sites  Properties the service account can see.
+     *
+     * @throws SourceFailed
+     */
+    public function resolveProperty(Connection $connection, array $sites): string
+    {
+        $configured = trim((string) $connection->setting('property'));
+        $email = $this->serviceAccountEmail($connection);
+        $visible = $sites === [] ? ' It can\'t see any property yet.' : ' It can see: ' . implode(', ', $sites) . '.';
+
+        if ($configured !== '') {
+            if (in_array($configured, $sites, true)) {
+                return $configured;
+            }
+
+            throw new SourceFailed("The service account can't see \"{$configured}\". In Search Console, add {$email} as a user of that property.{$visible}");
+        }
+
+        $domains = array_values(array_filter(array_map(
+            fn ($domain) => Domains::host((string) $domain),
+            (array) ($connection->brand?->domains ?? []),
+        )));
+
+        if ($domains === []) {
+            throw new SourceFailed('Add the brand\'s website domain, or enter the Search Console property on this keyword source.');
+        }
+
+        if ($property = static::matchProperty($domains, $sites)) {
+            return $property;
+        }
+
+        throw new SourceFailed('No Search Console property for ' . implode(', ', $domains) . ". In Search Console, open that site, go to Settings, then Users and permissions, then Add user, and add {$email} (Restricted is enough).{$visible}");
+    }
+
+    /**
+     * The Search Console property for a brand's domains: a domain property
+     * ("sc-domain:acme.com") first, then a URL-prefix property for the same
+     * site, preferring https and the site root.
+     *
+     * @param  array<string>  $domains  Hosts without "www.", e.g. "acme.com".
+     * @param  array<string>  $sites
+     */
+    public static function matchProperty(array $domains, array $sites): ?string
+    {
+        $wanted = collect($domains)->flatMap(fn ($domain) => [$domain, Domains::registrable($domain)])->filter()->unique()->values();
+
+        foreach ($wanted as $domain) {
+            if (in_array("sc-domain:{$domain}", $sites, true)) {
+                return "sc-domain:{$domain}";
+            }
+        }
+
+        return collect($sites)
+            ->reject(fn ($site) => str_starts_with($site, 'sc-domain:'))
+            ->filter(fn ($site) => $wanted->contains(Domains::host($site)))
+            ->sortBy(fn ($site) => (str_starts_with($site, 'https://') ? 0 : 1000) + strlen((string) parse_url($site, PHP_URL_PATH)))
+            ->first();
+    }
+
+    protected function serviceAccountEmail(Connection $connection): string
+    {
+        $key = json_decode((string) $connection->credential('service_account'), true);
+
+        return is_array($key) && filled($key['client_email'] ?? null) ? $key['client_email'] : 'the service account\'s email';
+    }
+
+    /**
+     * @return array<string>
+     *
+     * @throws SourceFailed
+     */
+    protected function sites(string $token): array
+    {
+        try {
+            $response = Http::timeout(30)->withToken($token)->get('https://www.googleapis.com/webmasters/v3/sites');
+        } catch (ConnectionException) {
+            throw new SourceFailed('Could not reach Google.');
+        }
+
+        if ($response->failed()) {
+            throw new SourceFailed('Search Console: ' . ($response->json('error.message') ?? 'HTTP ' . $response->status()), in_array($response->status(), [401, 403], true));
+        }
+
+        return collect($response->json('siteEntry', []))->pluck('siteUrl')->all();
     }
 
     public function fetch(Connection $connection): iterable
     {
         $token = $this->token($connection);
-        $property = (string) $connection->setting('property');
+        $property = $this->resolveProperty($connection, $this->sites($token));
+
+        // Remember the property that was found, so it shows on the keyword source.
+        if (trim((string) $connection->setting('property')) === '' && $connection->exists) {
+            $connection->forceFill(['config' => [...(array) $connection->config, 'property' => $property]])->saveQuietly();
+        }
 
         try {
             $response = Http::timeout(60)->withToken($token)->post(
