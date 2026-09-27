@@ -193,6 +193,20 @@ class RunPlanner
     }
 
     /**
+     * Why a run could not start right now, or null when it can.
+     */
+    public function blocker(Brand $brand, RunTrigger $trigger = RunTrigger::Manual): ?string
+    {
+        try {
+            $this->guard($brand, $trigger);
+        } catch (RunNotStarted $e) {
+            return $e->getMessage();
+        }
+
+        return null;
+    }
+
+    /**
      * @throws RunNotStarted
      */
     protected function guard(Brand $brand, RunTrigger $trigger): void

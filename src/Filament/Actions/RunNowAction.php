@@ -32,6 +32,11 @@ class RunNowAction
                     return null;
                 }
 
+                // Say so before the click, not after.
+                if ($blocker = app(RunPlanner::class)->blocker($target)) {
+                    return $blocker;
+                }
+
                 $engines = app(EngineManager::class)->usable($target);
                 $prompts = $target->activePrompts()->count();
                 $samples = (int) $target->setting('runs.samples', 1);

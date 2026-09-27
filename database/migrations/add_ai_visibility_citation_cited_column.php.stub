@@ -1,0 +1,29 @@
+<?php
+
+use Illuminate\Database\Migrations\Migration;
+use Illuminate\Database\Schema\Blueprint;
+use Illuminate\Support\Facades\Schema;
+
+return new class extends Migration
+{
+    protected function table(string $name): string
+    {
+        return config('ai-visibility.table_prefix', 'ai_visibility_') . $name;
+    }
+
+    public function up(): void
+    {
+        // Whether the engine cited the source in its answer, or only read it while
+        // searching. Null for answers recorded before this column existed.
+        Schema::table($this->table('citations'), function (Blueprint $table) {
+            $table->boolean('cited')->nullable()->after('position');
+        });
+    }
+
+    public function down(): void
+    {
+        Schema::table($this->table('citations'), function (Blueprint $table) {
+            $table->dropColumn('cited');
+        });
+    }
+};

@@ -177,6 +177,18 @@ it('matches cited domains on their boundaries', function () {
         ->and(collect($rows['cited'])->pluck('domain'))->not->toContain('example.com');
 });
 
+it('lists sources the engine marked as cited under cited, even when the text does not name them', function () {
+    $this->answer->citations()->createMany([
+        ['url' => 'https://blog.example/crm', 'domain' => 'blog.example', 'position' => 3, 'cited' => true],
+        ['url' => 'https://other.example/crm', 'domain' => 'other.example', 'position' => 4, 'cited' => false],
+    ]);
+
+    $rows = ResultResource::sourceRows($this->answer->fresh());
+
+    expect(collect($rows['cited'])->pluck('domain')->all())->toBe(['acme.com', 'blog.example'])
+        ->and(collect($rows['read'])->pluck('domain')->all())->toBe(['reviews.example', 'other.example']);
+});
+
 it('loads citation and mention competitors in one query each', function () {
     $this->answer->citations()->create(['url' => 'https://globex.com', 'domain' => 'globex.com', 'position' => 3, 'competitor_id' => $this->globex->id]);
     $result = Result::query()->find($this->answer->id);

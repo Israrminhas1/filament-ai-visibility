@@ -281,7 +281,10 @@ class AnswerAnalyzer
 
     protected function snippet(string $answer, string $name): ?string
     {
-        if (! preg_match('/[^.\n]*' . Text::namePattern(Text::clean($name)) . '[^.\n]*[.]?/iu', Text::clean($answer), $match)) {
+        // A sentence ends at a full stop followed by a space, not at the dot in "monday.com".
+        $inSentence = '(?:[^.\n]|\.(?=\S))*';
+
+        if (! preg_match('/' . $inSentence . Text::namePattern(Text::clean($name)) . $inSentence . '[.]?/iu', Text::clean($answer), $match)) {
             return null;
         }
 

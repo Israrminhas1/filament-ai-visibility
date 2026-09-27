@@ -51,6 +51,27 @@ it('extracts citations from the engine and from links in the answer', function (
     ]);
 });
 
+it('marks sources the engine only read as not cited, unless it also cites them', function () {
+    $response = new EngineResponse(
+        answer: 'Details at https://www.blog.example/post.',
+        citations: EngineResponse::uniqueCitations([
+            ['url' => 'https://acme.com/pricing', 'title' => 'Acme'],
+            ...EngineResponse::readOnly([
+                ['url' => 'https://acme.com/pricing', 'title' => 'Acme again'],
+                ['url' => 'https://g2.com/crm', 'title' => 'G2'],
+                ['url' => 'https://blog.example/post', 'title' => 'Blog'],
+            ]),
+        ]),
+        model: 'm',
+    );
+
+    expect(array_map(fn ($c) => [$c['domain'], $c['cited']], app(CitationExtractor::class)->extract($response)))->toBe([
+        ['acme.com', true],
+        ['g2.com', false],
+        ['blog.example', true],
+    ]);
+});
+
 it('resolves registrable domains and subdomain matches', function () {
     expect(Domains::registrable('https://shop.eu.acme.co.uk/x'))->toBe('acme.co.uk')
         ->and(Domains::registrable('docs.acme.com'))->toBe('acme.com')

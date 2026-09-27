@@ -185,6 +185,18 @@ monthly estimate = run estimate × runs per month   (daily = 30, weekly = 4.33, 
 
 **Cost per answer** is learned: the average cost of the tenant's last 50 successful answers for the same engine and model (at least 5 needed), else for the same engine, else `estimated_cost_per_result.{engine}` from the config ($0.02 for an engine not listed).
 
+Typical cost of one answer, measured with each engine's default model in September 2026 (these are the config defaults):
+
+| Engine | Per answer | Why |
+|---|---|---|
+| OpenAI | ~$0.02 | 1–2 searches |
+| Anthropic | ~$0.08 | 2 searches, and the search results are billed as input tokens |
+| Gemini | ~$0.09 | Gemini 3 bills each search query, often 4–5 per answer |
+| Grok | ~$0.30 | many searches per answer (8 on average in testing) |
+| Perplexity | ~$0.005 | |
+| Google AI Overviews | ~$0.03 | 1–2 SerpAPI searches, at your plan's price |
+| Google AI Mode | ~$0.015 | 1 SerpAPI search, at your plan's price |
+
 ## Budgets
 
 Two budgets, both optional and both monthly (calendar month):

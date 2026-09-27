@@ -50,10 +50,8 @@ trait ParsesResponsesApi
             }
         }
 
-        // xAI can also return a top-level list of citation URLs.
-        foreach ((array) data_get($json, 'citations', []) as $citation) {
-            $citations[] = $citation;
-        }
+        // xAI can also return a top-level list of every source it used.
+        array_push($citations, ...EngineResponse::readOnly((array) data_get($json, 'citations', [])));
 
         return new EngineResponse(
             answer: trim(implode("\n\n", $text)),

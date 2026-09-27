@@ -166,7 +166,8 @@ class ResultResource extends Resource
         $result->loadMissing('citations.competitor');
 
         foreach ($result->citations as $citation) {
-            $inText = $answer !== '' && (
+            // Engines that mark citations say so; otherwise look for the source in the text.
+            $inText = $citation->cited || $answer !== '' && (
                 (filled($citation->url) && str_contains($answer, mb_strtolower((string) $citation->url)))
                 || static::mentionsDomain($answer, (string) $citation->domain)
             );

@@ -64,7 +64,10 @@ it('reads Claude answers with web search and continues paused turns', function (
     $answer = ask('anthropic', 'claude-sonnet-5');
 
     expect($answer->answer)->toBe('Try Acme. Or Globex.')
-        ->and(array_column($answer->citations, 'url'))->toBe(['https://acme.com', 'https://g2.com/crm'])
+        ->and($answer->citations)->toBe([
+            ['url' => 'https://acme.com', 'title' => 'Acme'],
+            ['url' => 'https://g2.com/crm', 'title' => 'Best CRM', 'read' => true],
+        ])
         ->and([$answer->inputTokens, $answer->outputTokens, $answer->searches])->toBe([250, 40, 1]);
 
     Http::assertSentCount(2);
@@ -130,10 +133,10 @@ it('reads Perplexity Agent API and Grok answers', function () {
     $grok = ask('grok', 'grok-4.7');
 
     expect($perplexity->answer)->toBe('Acme [1].')
-        ->and($perplexity->citations)->toBe([['url' => 'https://acme.com', 'title' => 'Acme'], ['url' => 'https://g2.com/crm', 'title' => 'G2']])
+        ->and($perplexity->citations)->toBe([['url' => 'https://acme.com', 'title' => 'Acme'], ['url' => 'https://g2.com/crm', 'title' => 'G2', 'read' => true]])
         ->and([$perplexity->model, $perplexity->inputTokens, $perplexity->outputTokens, $perplexity->searches])->toBe(['perplexity/sonar', 10, 5, 2])
         ->and($grok->answer)->toBe('Globex.')
-        ->and($grok->citations)->toBe([['url' => 'https://globex.io', 'title' => null]])
+        ->and($grok->citations)->toBe([['url' => 'https://globex.io', 'title' => null, 'read' => true]])
         ->and($grok->searches)->toBe(1);
 });
 

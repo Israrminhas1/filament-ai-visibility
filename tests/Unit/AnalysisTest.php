@@ -182,6 +182,13 @@ describe('answer analysis', function () {
             ->and(AnswerAnalyzer::maxTokens(20))->toBe(8000);
     });
 
+    it('quotes the whole sentence for names next to a domain', function () {
+        $snippet = fn (string $answer, string $name) => (fn () => $this->snippet($answer, $name))->call(app(AnswerAnalyzer::class));
+
+        expect($snippet("Intro.\n\n## monday.com (monday dev)\nMore text.", 'monday dev'))->toBe('## monday.com (monday dev)')
+            ->and($snippet('First one. Then Zenhub is GitHub-native. Last.', 'Zenhub'))->toBe('Then Zenhub is GitHub-native.');
+    });
+
     it('maps the short form of a legal name back to the brand', function () {
         app(KeyResolver::class)->store('openai', 'sk');
         $this->brand->update(['name' => 'Acme, Inc.']);

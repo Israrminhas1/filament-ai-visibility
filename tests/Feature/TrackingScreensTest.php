@@ -79,6 +79,14 @@ it('explains why a run cannot start', function () {
     Queue::assertNothingPushed();
 });
 
+it('warns in the confirmation when the daily run limit is already reached', function () {
+    $this->brand->update(['settings' => ['limits' => ['max_runs_per_brand_per_day' => 1]]]);
+    Run::query()->create(['brand_id' => $this->brand->id]);
+
+    livewire(EditBrand::class, ['record' => $this->brand->getRouteKey()])
+        ->assertActionExists('runNow', fn (\Filament\Actions\Action $action) => str_contains((string) $action->getModalDescription(), 'has reached its limit of 1 runs today'));
+});
+
 it('retries skipped answers from the run page', function () {
     $run = app(RunPlanner::class)->start($this->brand);
     app(EngineManager::class)->pause('openai', PauseReason::InvalidKey);

@@ -78,6 +78,7 @@ class AiVisibilityServiceProvider extends PackageServiceProvider
                 'create_ai_visibility_automation_tables',
                 'create_ai_visibility_batches_table',
                 'add_ai_visibility_reliability_columns',
+                'add_ai_visibility_citation_cited_column',
             ])
             ->hasCommands([
                 InstallCommand::class,

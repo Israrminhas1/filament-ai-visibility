@@ -227,7 +227,7 @@ class AnthropicEngine extends HttpEngine implements SupportsBatches
         // Sources the answer actually cites come first, then everything the search returned.
         return new EngineResponse(
             answer: trim($text),
-            citations: EngineResponse::uniqueCitations([...$cited, ...$results]),
+            citations: EngineResponse::uniqueCitations([...$cited, ...EngineResponse::readOnly($results)]),
             model: $model,
             inputTokens: $inputTokens,
             outputTokens: $outputTokens,

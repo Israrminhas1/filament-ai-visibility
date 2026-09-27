@@ -103,7 +103,7 @@ class PerplexityEngine extends HttpEngine
         // Sources the answer cites come first, then everything the search returned.
         return new EngineResponse(
             answer: $answer->answer ?: trim((string) $response->json('output_text')),
-            citations: EngineResponse::uniqueCitations([...$answer->citations, ...$results]),
+            citations: EngineResponse::uniqueCitations([...$answer->citations, ...EngineResponse::readOnly($results)]),
             model: $answer->model,
             inputTokens: $answer->inputTokens,
             outputTokens: $answer->outputTokens,

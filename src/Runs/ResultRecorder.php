@@ -9,6 +9,7 @@ use IsrarMinhas\FilamentAiVisibility\Detection\Domains;
 use IsrarMinhas\FilamentAiVisibility\Detection\MentionDetector;
 use IsrarMinhas\FilamentAiVisibility\Detection\SourceCategory;
 use IsrarMinhas\FilamentAiVisibility\Engines\EngineResponse;
+use IsrarMinhas\FilamentAiVisibility\Models\Citation;
 use IsrarMinhas\FilamentAiVisibility\Models\Result;
 use IsrarMinhas\FilamentAiVisibility\Models\Usage;
 use IsrarMinhas\FilamentAiVisibility\Support\Pricing;
@@ -66,7 +67,7 @@ class ResultRecorder
                     'is_brand' => $isBrand,
                     'competitor_id' => $competitor?->getKey(),
                     'category' => $this->categories->categorize($citation['url'], $brand, $isBrand, $competitor?->getKey()),
-                ]);
+                ] + (Citation::hasCitedColumn() ? ['cited' => $citation['cited'] ?? true] : []));
             }
 
             // The status is set by RunProgress::finish(), which counts each result exactly once.

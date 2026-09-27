@@ -153,16 +153,18 @@ return [
     |
     | Rough USD cost of one tracked answer per engine (tokens + web search),
     | used for budget estimates before real usage data exists. Actual costs
-    | are measured from token usage once runs happen.
+    | are measured from token usage once runs happen. The defaults are averages
+    | measured with each engine's default model (September 2026); search results
+    | count as input tokens, so engines that search a lot cost more.
     |
     */
     'estimated_cost_per_result' => [
-        'openai' => 0.015,
-        'anthropic' => 0.03,
-        'gemini' => 0.03,
-        'grok' => 0.02,
+        'openai' => 0.02,
+        'anthropic' => 0.08,
+        'gemini' => 0.09,
+        'grok' => 0.30,
         'perplexity' => 0.005,
-        'google_ai_overview' => 0.015,
+        'google_ai_overview' => 0.03,
         'google_ai_mode' => 0.015,
     ],
 

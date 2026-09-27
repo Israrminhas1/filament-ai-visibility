@@ -19,7 +19,7 @@ class CitationExtractor
     protected const TRACKING_PARAMS = ['gclid', 'gclsrc', 'dclid', 'fbclid', 'msclkid', 'yclid', 'twclid', 'igshid', 'mc_cid', 'mc_eid', '_hsenc', '_hsmi', 'srsltid', 'ref_src', 'ref_url'];
 
     /**
-     * @return array<int, array{url: string, title: ?string, domain: string}>
+     * @return array<int, array{url: string, title: ?string, domain: string, cited: bool}>
      */
     public function extract(EngineResponse $response): array
     {
@@ -48,12 +48,19 @@ class CitationExtractor
             $key = static::key($url);
             $domain = Domains::registrable($url);
 
-            if (! $domain || isset($seen[$key])) {
+            if (! $domain) {
                 continue;
             }
 
-            $seen[$key] = true;
-            $citations[] = ['url' => $url, 'title' => $citation['title'], 'domain' => $domain];
+            // The same page read once and cited once counts as cited.
+            if (isset($seen[$key])) {
+                $citations[$seen[$key]]['cited'] = $citations[$seen[$key]]['cited'] || empty($citation['read']);
+
+                continue;
+            }
+
+            $seen[$key] = count($citations);
+            $citations[] =['url' => $url, 'title' => $citation['title'], 'domain' => $domain, 'cited' => empty($citation['read'])];
         }
 
         return $citations;

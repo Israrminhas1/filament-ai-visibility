@@ -1,5 +1,15 @@
 # Changelog
 
+## v1.0.6 — 2026-09-27
+
+More fixes from the end-to-end run, now with OpenAI and Claude and economy mode.
+
+- New migration: publish and run it when upgrading (`php artisan vendor:publish --tag=ai-visibility-migrations && php artisan migrate`). Answers keep being recorded if you haven't migrated yet.
+- Answer page: "Cited in the answer" now uses what the engine reports. Claude, Perplexity and Grok return every page they read as well as the pages they cite; only the cited ones were meant to be listed as cited. Before, a source counted as cited only when its domain appeared in the answer text, so most of Claude's cited sources ended up under "Also read".
+- Fixed: mention quotes were cut at the dot in a domain ("com (monday dev)" instead of "monday.com (monday dev)").
+- The Run now confirmation says when a run cannot start (for example the daily run limit is reached), instead of only after you click Start.
+- Cost estimates before the first answers use measured averages: Claude ~$0.08, Gemini ~$0.09 and Grok ~$0.30 per answer were estimated far too low. See the table in `docs/engines-and-costs.md`.
+
 ## v1.0.5 — 2026-09-27
 
 Fixes from an end-to-end run with live API keys.
