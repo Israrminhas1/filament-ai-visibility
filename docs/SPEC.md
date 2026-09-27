@@ -24,7 +24,7 @@ A Filament plugin that tracks how brands show up in answers from AI assistants. 
 | **Competitor intelligence** | Discovery (from citations *and* named entities), scoring, evidence-based classification, review queue, learning from overrides |
 | **Citations** | Source categorisation (own, competitor, review site, forum, media, marketplace…), source gap analysis |
 | **Reports** | Dashboard, competitor leaderboard, head-to-head, opportunities, provider matrix, topic report, answer history & diffs |
-| **Automation** | Alert rules, scheduled email/PDF reports, events, batch "economy mode" |
+| **Automation** | Alert rules, scheduled email/PDF reports, events. Batch "economy mode" (removed in v1.1: batch APIs saved little because web-search fees are not discounted) |
 | **Control** | Settings with per-brand overrides: limits, budgets, models, schedules, editable AI instructions; cost tracking by purpose; global kill switch; optional AI Monitor integration |
 | **Customisation** | Swappable services, custom engines, keyword sources, labels, citation categories, alert channels and report pages; publishable views and translations |
 
@@ -202,7 +202,7 @@ Engines without a key show as "Not configured" and are skipped.
 3. **Guard.** Setup complete and kill switch off; limits (§13); monthly and per-brand budgets; engine states (§6.1). Paused engines are left out of the plan. If no engine is usable the run is not created and the user is told why. If the estimated cost exceeds the remaining budget, the run is not started and a notification explains why.
 4. **Dispatch.**
    - *Realtime mode:* one `RunResultJob` per result in a `Bus::batch`; `RateLimited` middleware per engine; 3 tries with backoff.
-   - *Economy mode (batch):* for engines whose batch API supports the search tool, results are submitted as a provider batch job (typically ~50% cheaper, finishes within 24h) and polled by `ai-visibility:poll-batches`. Engines without batch support fall back to realtime. Verify each provider's batch + web-search support at build time.
+   - *Economy mode (batch)* (removed in v1.1: batch APIs saved little because web-search fees are not discounted): for engines whose batch API supports the search tool, results are submitted as a provider batch job (typically ~50% cheaper, finishes within 24h) and polled by `ai-visibility:poll-batches`. Engines without batch support fall back to realtime. Verify each provider's batch + web-search support at build time.
 5. **Execute.** Store answer and citations, then run the post-processing chain: detection (§7) → citation categorisation (§9) → analysis (§10, if enabled) → candidate discovery (§8.1).
 6. **Budget stop.** If spend passes the cap mid-run, the batch is cancelled and the run marked `stopped_budget`.
 7. **Finish.** Run totals/status updated; `RunCompleted` fired; alert rules evaluated (§12.1); starter notified for manual runs.
@@ -407,7 +407,7 @@ A Filament settings page backed by the `settings` table, falling back to `config
 |---|---|---|
 | Engines | Enabled engines, model per engine | All with a key; engine defaults |
 | Engines | Requests per minute per engine | 20 |
-| Engines | Economy mode (batch APIs) | off |
+| Engines | Economy mode (batch APIs) (removed in v1.1: batch APIs saved little because web-search fees are not discounted) | off |
 | Runs | Samples per prompt | 1 (max 5) |
 | Runs | Default frequency, time of day | weekly, 03:00 |
 | Limits | Max brands / competitors per brand / active prompts per brand | unlimited / 20 / 50 |
@@ -519,7 +519,7 @@ AiVisibilityPlugin::make()
     ->withoutSetupWizard();                                 // configure through code instead
 ```
 
-**Artisan:** `ai-visibility:install`, `ai-visibility:health` (prints the §2.2 checks; non-zero exit code for monitoring), `ai-visibility:engines {--test} {--resume=}`, `ai-visibility:sync-keywords {--brand=}`, `ai-visibility:run {--due} {--brand=}`, `ai-visibility:poll-batches`, `ai-visibility:discover {--brand=}`, `ai-visibility:classify {--brand=} {--stale}`, `ai-visibility:alerts`, `ai-visibility:send-reports`, `ai-visibility:prune`.
+**Artisan:** `ai-visibility:install`, `ai-visibility:health` (prints the §2.2 checks; non-zero exit code for monitoring), `ai-visibility:engines {--test} {--resume=}`, `ai-visibility:sync-keywords {--brand=}`, `ai-visibility:run {--due} {--brand=}`, `ai-visibility:poll-batches` (removed in v1.1: batch APIs saved little because web-search fees are not discounted), `ai-visibility:discover {--brand=}`, `ai-visibility:classify {--brand=} {--stale}`, `ai-visibility:alerts`, `ai-visibility:send-reports`, `ai-visibility:prune`.
 
 ## 18. Quality
 
@@ -542,7 +542,7 @@ Each milestone ends with a tagged release, so the plugin is usable early while t
 | 5 | 0.5 | Analysis pass (sentiment, recommendation, descriptors, entities), Competitors, Head-to-head and Opportunities reports |
 | 6 | 0.6 | Keywords and connections (manual/CSV, SerpAPI PAA, optional GSC and DataForSEO), grounded generation with quality gate, wizard steps 6–7, volume-weighted reach, topic clustering, Topics report |
 | 7 | 0.7 | Alert rules, scheduled email/PDF reports, events |
-| 8 | 1.0 | Economy (batch) mode, Google AI Overviews / AI Mode via SerpAPI, docs with screenshots, Filament directory listing |
+| 8 | 1.0 | Economy (batch) mode (removed in v1.1: batch APIs saved little because web-search fees are not discounted), Google AI Overviews / AI Mode via SerpAPI, docs with screenshots, Filament directory listing |
 
 ## 20. Open questions
 

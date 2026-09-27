@@ -5,7 +5,6 @@ namespace IsrarMinhas\FilamentAiVisibility\Runs;
 use Carbon\CarbonInterface;
 use IsrarMinhas\FilamentAiVisibility\Enums\ResultStatus;
 use IsrarMinhas\FilamentAiVisibility\Jobs\RunResultJob;
-use IsrarMinhas\FilamentAiVisibility\Models\Batch;
 use IsrarMinhas\FilamentAiVisibility\Models\Result;
 use IsrarMinhas\FilamentAiVisibility\Models\Run;
 use IsrarMinhas\FilamentAiVisibility\Support\Tenancy;
@@ -56,20 +55,6 @@ class RunSweeper
                 return false;
             }
         }
-
-        // Economy batches may take up to a day. The batch poller gives up on them after
-        // give_up_after_hours and answers the rest in real time: leave it 2 hours to do so first.
-        $batchDeadline = now()->subHours((int) config('ai-visibility.economy.give_up_after_hours', 26) + 2);
-
-        if (Batch::query()->withoutGlobalScopes()->where('run_id', $run->getKey())->where('status', Batch::SUBMITTED)->where('submitted_at', '>=', $batchDeadline)->exists()) {
-            return false;
-        }
-
-        // Batches whose submission never completed will not be polled.
-        Batch::query()->withoutGlobalScopes()
-            ->where('run_id', $run->getKey())
-            ->where('status', Batch::SUBMITTING)
-            ->update(['status' => Batch::FAILED, 'error' => 'The submission did not complete.', 'completed_at' => now(), 'updated_at' => now()]);
 
         $this->progress->open($run)->update([
             'status' => ResultStatus::Failed->value,

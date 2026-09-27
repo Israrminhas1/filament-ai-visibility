@@ -66,7 +66,7 @@ class Spend
 
     /**
      * Estimated cost of answers still to come in unfinished runs: each run's estimate
-     * pro-rated by its unanswered results (answers in open batches are among them).
+     * pro-rated by its unanswered results.
      */
     public function committed(?Brand $brand = null): float
     {

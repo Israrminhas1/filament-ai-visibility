@@ -1,0 +1,26 @@
+<?php
+
+use Illuminate\Database\Migrations\Migration;
+use Illuminate\Support\Facades\Schema;
+
+return new class extends Migration
+{
+    protected function table(string $name): string
+    {
+        return config('ai-visibility.table_prefix', 'ai_visibility_') . $name;
+    }
+
+    /**
+     * Economy (batch) mode was removed in v1.1. Answers that were still waiting
+     * on a batch are closed by the run sweeper and can be retried in real time.
+     */
+    public function up(): void
+    {
+        Schema::dropIfExists($this->table('batches'));
+    }
+
+    public function down(): void
+    {
+        // Not recreated: nothing uses it any more.
+    }
+};

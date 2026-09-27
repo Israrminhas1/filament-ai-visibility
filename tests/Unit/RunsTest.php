@@ -266,12 +266,35 @@ describe('running', function () {
         app(EngineManager::class)->resume('openai');
         Queue::fake();
 
-        expect(app(RunPlanner::class)->retrySkipped($run))->toBe(2);
+        expect(app(RunPlanner::class)->retryUnanswered($run))->toBe(2);
         work();
 
         expect($run->refresh()->status)->toBe(RunStatus::Completed)
             ->and($run->results_done)->toBe(2)
             ->and($run->results_skipped)->toBe(0);
+    });
+
+    it('retries failed answers too, e.g. ones lost with the queue', function () {
+        Http::fake(['api.openai.com/*' => openAiAnswer()]);
+
+        $run = app(RunPlanner::class)->start($this->brand);
+        $lost = $run->results()->first();
+        $lost->update(['status' => ResultStatus::Failed, 'error' => RunSweeper::LOST_JOB]);
+        $run->increment('results_failed');
+        work();
+
+        expect($run->refresh()->results_failed)->toBe(1)
+            ->and($run->status)->toBe(RunStatus::Partial);
+
+        Queue::fake();
+
+        expect(app(RunPlanner::class)->retryUnanswered($run))->toBe(1);
+        work();
+
+        expect($run->refresh()->status)->toBe(RunStatus::Completed)
+            ->and($run->results_done)->toBe(2)
+            ->and($run->results_failed)->toBe(0)
+            ->and($lost->refresh()->error)->toBeNull();
     });
 });
 

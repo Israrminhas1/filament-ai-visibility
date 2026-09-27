@@ -52,7 +52,7 @@ A paused engine is skipped straight away: its remaining answers in a run are mar
 | Budget reached | The tenant's monthly budget is used up | Yes, when there is budget again (new month or raised budget), checked every 5 minutes | Raise the budget in **Settings → Budget**, or wait. |
 | Paused manually | Someone clicked **Pause** | No | **Test & resume**. |
 
-After fixing an engine, open the run and click **Retry skipped** to collect the answers that were skipped. It re-queues them in real time.
+After fixing an engine, open the run and click **Retry unanswered** to collect the answers that were skipped. It re-queues them in real time.
 
 The automatic checks are done by `ai-visibility:probe` every 5 minutes. If engines never come back on their own, check that the scheduler runs.
 
@@ -86,8 +86,6 @@ Scheduled runs:
 
 Each answer waits 10–60 seconds on a web search, so one worker answers only a few prompts a minute. Add worker processes for the tracking queue and check the requests-per-minute setting. See [Queues and scheduler → Throughput](queues-and-scheduler.md#throughput-how-many-workers-you-need).
 
-Economy mode answers arrive within 24 hours by design. The run page shows how many answers are still waiting in batches.
-
 ## Stuck runs and the sweeper
 
 A run can stop making progress if its queue jobs were lost (a flushed queue, a crashed worker, a deleted job). `ai-visibility:sweep-runs` (hourly, and before every `ai-visibility:run --due`) closes runs where nothing has changed for `tracking.stale_run_hours` (6 hours):
@@ -95,7 +93,7 @@ A run can stop making progress if its queue jobs were lost (a flushed queue, a c
 - The unanswered answers are marked **Failed** with "Never answered: the queue job was lost."
 - The run is closed as partial or failed, and `RunCompleted` fires (analysis and alerts follow).
 
-A run is left alone while answers are still scheduled on the engine's pacing schedule, or while an economy batch is still within `economy.give_up_after_hours` + 2 hours.
+A run is left alone while answers are still scheduled on the engine's pacing schedule.
 
 Run it by hand:
 
@@ -111,7 +109,7 @@ The queue connection's `retry_after` is shorter than the job. Laravel's default 
 
 Fix: set `retry_after` to at least 960 on the connection AI Visibility uses, and run workers with `--timeout=930`. See [Queues and scheduler](queues-and-scheduler.md#retry_after-and-worker-timeout-required).
 
-AI Visibility protects you from paying twice: an answer is claimed before it is asked, one discovery runs per brand at a time, and an economy batch is never sent twice. But duplicate pickups still waste workers and produce errors in your logs.
+AI Visibility protects you from paying twice: an answer is claimed before it is asked, and one discovery runs per brand at a time. But duplicate pickups still waste workers and produce errors in your logs.
 
 ## The brand is not detected in answers
 

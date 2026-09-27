@@ -23,7 +23,6 @@ AI Visibility runs on your app's own queue and scheduler. It does not start its 
 Every AI call that can be slow runs in a queued job:
 
 - Answering tracked prompts (one job per prompt × engine × sample).
-- Sending economy-mode batches.
 - Answer analysis, competitor discovery and classification.
 - Re-checking stored answers after a brand's names change.
 - Checking alert rules after each run.
@@ -40,7 +39,7 @@ Out of the box, every job goes to your app's **default queue connection** and th
 'queues' => [
     // Queue connection (null = your app's default).
     'connection' => env('AI_VISIBILITY_QUEUE_CONNECTION'),
-    // Answering prompts, and economy-mode batch submissions: high volume, slow calls.
+    // Answering prompts: high volume, slow calls.
     'tracking' => env('AI_VISIBILITY_QUEUE_TRACKING', env('AI_VISIBILITY_QUEUE', 'default')),
     // Alert rules after each run: short jobs.
     'analysis' => env('AI_VISIBILITY_QUEUE_ANALYSIS', env('AI_VISIBILITY_QUEUE', 'default')),
@@ -63,8 +62,7 @@ The connection must not use the `sync` driver. Manual runs are refused on `sync`
 
 | Job | What it does | Dispatched when | Queue key | Own timeout | Retries | Typical duration |
 |---|---|---|---|---|---|---|
-| `RunResultJob` | Asks one prompt on one engine with web search, stores the answer, mentions, sources and cost. | A run starts (one job per answer), **Retry skipped** on a run, or economy-mode answers that must be retried in real time. | `tracking` | 240 s | Retries rate limits and outages until its slot + `tracking.retry_for_seconds` (at least 1 hour). Up to 3 unexpected errors. | 10–60 s. Up to about 3 minutes (Claude can continue a long search for up to three turns). |
-| `SubmitBatchJob` | Economy mode: sends one engine's share of a scheduled run to the provider's batch API. | A scheduled run starts with economy mode on (one job per engine per `economy.max_batch_size` answers). | `tracking` | Worker's | Never retried. If it fails, the answers are asked in real time instead. | A few seconds (one upload). |
+| `RunResultJob` | Asks one prompt on one engine with web search, stores the answer, mentions, sources and cost. | A run starts (one job per answer) or **Retry unanswered** on a run. | `tracking` | 240 s | Retries rate limits and outages until its slot + `tracking.retry_for_seconds` (at least 1 hour). Up to 3 unexpected errors. | 10–60 s. Up to about 3 minutes (Claude can continue a long search for up to three turns). |
 | `EvaluateAlertsJob` | Checks alert rules for the brand against the new answers. | A run finishes. | `analysis` | Worker's | 2 tries | Seconds. |
 | `DiscoverCompetitorsJob` | Answer analysis (sentiment, recommendation, descriptors), name extraction, competitor discovery, scoring and classification, then "new direct competitor" alerts. | A run finishes with at least one answer (when analysis or discovery is on); daily `ai-visibility:discover --queue`; **Discover now** on the Discovered screen. | `classification` | 900 s | Waits up to 3 hours for another discovery of the same brand to finish; 2 real failures allowed. One per brand at a time. | Seconds to several minutes (helper AI calls in batches, website fetches). |
 | `ClassifyCandidatesJob` | Classifies chosen candidates again. | **Classify again** on the Discovered screen. | `classification` | 900 s | Waits up to 3 hours for a running discovery; 1 real failure allowed. | Seconds to minutes. |
@@ -87,7 +85,6 @@ The package registers these with Laravel's scheduler. You do not add them yourse
 | `ai-visibility:queue-heartbeat:{queue}` | Every 5 minutes | One per distinct configured queue: queues a `QueueHeartbeat` on that queue. |
 | `ai-visibility:run --due` | Every 15 minutes, without overlapping | Closes stuck runs, then starts every brand whose scheduled run is due. |
 | `ai-visibility:probe` | Every 5 minutes, without overlapping | Re-tests paused engines and resumes those that work; lifts budget pauses when budget is available again. |
-| `ai-visibility:poll-batches` | Every 5 minutes, without overlapping | Stores answers from finished economy-mode batches. |
 | `ai-visibility:alerts --watch` | Every 10 minutes | Queue watchdog: alerts if no worker has processed a job for `health.queue_critical_after` minutes. |
 | `ai-visibility:alerts` | Daily at 07:00 | Checks every alert rule for every active brand (plus the queue watchdog). |
 | `ai-visibility:discover --queue` | Daily at 04:30 | Queues discovery for every active brand (stale classifications are refreshed). |

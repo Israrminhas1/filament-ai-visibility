@@ -15,7 +15,6 @@ Brands can then override some settings again ([per-brand overrides](#per-brand-o
   - [Engines and models](#engines-and-models)
   - [Helper engine order](#helper-engine-order)
   - [Cost estimates and pricing](#cost-estimates-and-pricing)
-  - [Economy mode](#economy-mode)
   - [Markets](#markets)
   - [Source categories](#source-categories)
   - [Competitor discovery](#competitor-discovery)
@@ -32,7 +31,7 @@ Brands can then override some settings again ([per-brand overrides](#per-brand-o
 |---|---|---|
 | `AI_VISIBILITY_QUEUE_CONNECTION` | Queue connection for all jobs | App default |
 | `AI_VISIBILITY_QUEUE` | Queue name for all jobs (fallback for the three below) | `default` |
-| `AI_VISIBILITY_QUEUE_TRACKING` | Queue for answer jobs and batch submissions | `AI_VISIBILITY_QUEUE` |
+| `AI_VISIBILITY_QUEUE_TRACKING` | Queue for answer jobs | `AI_VISIBILITY_QUEUE` |
 | `AI_VISIBILITY_QUEUE_ANALYSIS` | Queue for alert checks | `AI_VISIBILITY_QUEUE` |
 | `AI_VISIBILITY_QUEUE_CLASSIFICATION` | Queue for discovery, classification and re-detection | `AI_VISIBILITY_QUEUE` |
 | `AI_VISIBILITY_OPENAI_KEY` | OpenAI key fallback | none |
@@ -61,7 +60,7 @@ Publish it with `php artisan vendor:publish --tag=ai-visibility-config` (the ins
 | Key | Default | Meaning |
 |---|---|---|
 | `queues.connection` | `AI_VISIBILITY_QUEUE_CONNECTION` or app default | Connection for all jobs. |
-| `queues.tracking` | `AI_VISIBILITY_QUEUE_TRACKING` → `AI_VISIBILITY_QUEUE` → `default` | Answer jobs (`RunResultJob`, `SubmitBatchJob`). |
+| `queues.tracking` | `AI_VISIBILITY_QUEUE_TRACKING` → `AI_VISIBILITY_QUEUE` → `default` | Answer jobs (`RunResultJob`). |
 | `queues.analysis` | `AI_VISIBILITY_QUEUE_ANALYSIS` → `AI_VISIBILITY_QUEUE` → `default` | `EvaluateAlertsJob`. |
 | `queues.classification` | `AI_VISIBILITY_QUEUE_CLASSIFICATION` → `AI_VISIBILITY_QUEUE` → `default` | `DiscoverCompetitorsJob` (includes answer analysis), `ClassifyCandidatesJob`, `RedetectBrandJob`. |
 
@@ -126,18 +125,8 @@ The automatic helper does not require the engine to be switched on for tracking.
 | `pricing.fallback.{engine}` | Token price for models not listed above. |
 | `pricing.search_fee.{engine}` | USD per web search (per SerpAPI search for the Google engines). |
 | `pricing.search_fee_models.{prefix}` | Search fee for models that differ from their engine (default: `gemini-2.5` → 0.035 per grounded prompt). Longest prefix wins. |
-| `pricing.batch_discount` | Token discount for economy (batch) answers. Default `0.5`. Search fees are not discounted. |
 
 When AI Monitor is installed and has a price for the model, its token price is used instead of `pricing.models`. How costs and estimates are calculated: [Engines and costs](engines-and-costs.md#how-costs-are-calculated).
-
-### Economy mode
-
-| Key | Default | Meaning |
-|---|---|---|
-| `economy.max_batch_size` | `1000` | Most answers in one provider batch. Larger runs are split into several batches. |
-| `economy.give_up_after_hours` | `26` | A batch still unfinished after this long is closed, and its unanswered prompts are asked in real time. |
-
-Economy mode itself is switched on in Settings. See [Engines and costs](engines-and-costs.md#economy-batch-mode).
 
 ### Markets
 
@@ -216,7 +205,6 @@ In practice: once someone saves the Settings page, most keys are stored for that
 | `engines.enabled` | `[]` | Engines & API keys → Track this engine |
 | `engines.models` | `[]` | Engines & API keys → Model for tracked prompts (per engine) |
 | `engines.requests_per_minute` | `20` | Engines & API keys → Requests per minute, per engine |
-| `engines.economy` | `false` | Engines & API keys → Economy mode for scheduled runs |
 | `runs.samples` | `1` | Runs & limits → Samples per prompt (1–5) |
 | `runs.frequency` | `weekly` | Runs & limits → Default run frequency (for new brands: `daily`, `weekly`, `manual`) |
 | `runs.time` | `03:00` | Runs & limits → Run at (time of day for scheduled runs) |
@@ -263,7 +251,7 @@ Notes:
 
 | Tab | Contains | Stored in |
 |---|---|---|
-| Engines & API keys | Per engine: Track this engine, API key (with **Test key** and **Remove saved key**), model. Requests per minute (applies to each engine separately). Economy mode for scheduled runs. | Settings row; keys in `provider_keys` |
+| Engines & API keys | Per engine: Track this engine, API key (with **Test key** and **Remove saved key**), model. Requests per minute (applies to each engine separately). | Settings row; keys in `provider_keys` |
 | Runs & limits | Frequency, time, samples; all limits | Settings row |
 | Budget | Monthly budget, stop at budget | Settings row |
 | AI helpers | Helper engine (Automatic or pinned) and model | Settings row |

@@ -51,7 +51,7 @@ return [
     'queues' => [
         // Queue connection (null = your app's default).
         'connection' => env('AI_VISIBILITY_QUEUE_CONNECTION'),
-        // Answering prompts, and economy-mode batch submissions: high volume, slow calls.
+        // Answering prompts: high volume, slow calls.
         'tracking' => env('AI_VISIBILITY_QUEUE_TRACKING', env('AI_VISIBILITY_QUEUE', 'default')),
         // Alert rules after each run: short jobs.
         'analysis' => env('AI_VISIBILITY_QUEUE_ANALYSIS', env('AI_VISIBILITY_QUEUE', 'default')),
@@ -263,24 +263,6 @@ return [
         'search_fee_models' => [
             'gemini-2.5' => 0.035,
         ],
-        // Token discount for economy (batch) mode.
-        'batch_discount' => 0.5,
-    ],
-
-    /*
-    |--------------------------------------------------------------------------
-    | Economy mode
-    |--------------------------------------------------------------------------
-    |
-    | When turned on in Settings, scheduled runs on OpenAI and Claude use the
-    | providers' batch APIs: about half the token cost, answers within 24
-    | hours. Manual runs always answer in real time. Anything a batch cannot
-    | answer is retried in real time after `give_up_after_hours`.
-    |
-    */
-    'economy' => [
-        'max_batch_size' => 1000,
-        'give_up_after_hours' => 26,
     ],
 
     /*
@@ -414,7 +396,6 @@ return [
             'enabled' => [],
             'models' => [],
             'requests_per_minute' => 20,
-            'economy' => false,
         ],
         'runs' => [
             'samples' => 1,

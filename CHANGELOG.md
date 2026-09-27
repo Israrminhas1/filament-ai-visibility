@@ -1,14 +1,29 @@
 # Changelog
 
-## v1.0.6 — 2026-09-27
+## v1.1.0 — 2026-09-27
 
-More fixes from the end-to-end run, now with OpenAI and Claude and economy mode.
+More fixes from the end-to-end run, now with OpenAI and Claude, and economy mode is removed.
 
-- New migration: publish and run it when upgrading (`php artisan vendor:publish --tag=ai-visibility-migrations && php artisan migrate`). Answers keep being recorded if you haven't migrated yet.
-- Answer page: "Cited in the answer" now uses what the engine reports. Claude, Perplexity and Grok return every page they read as well as the pages they cite; only the cited ones were meant to be listed as cited. Before, a source counted as cited only when its domain appeared in the answer text, so most of Claude's cited sources ended up under "Also read".
-- Fixed: mention quotes were cut at the dot in a domain ("com (monday dev)" instead of "monday.com (monday dev)").
+**Upgrading:** publish and run the new migrations (`php artisan vendor:publish --tag=ai-visibility-migrations && php artisan migrate`), then restart your queue workers. Answers keep being recorded if you haven't migrated yet.
+
+### Removed: economy (batch) mode
+
+Testing with live keys showed the batch APIs saved little: they discount tokens but not web-search fees, so OpenAI answers were about 5% cheaper and Claude answers about 35%, in exchange for answers arriving up to 24 hours later. Every run is now answered in real time.
+
+- The "Economy mode for scheduled runs" setting, the `ai-visibility:poll-batches` command and its schedule, and the `economy` and `pricing.batch_discount` config keys are gone. You can delete those keys from a published config file; they are ignored.
+- A migration drops the batches table. Answers that were still waiting in a batch are closed by the run sweeper after `tracking.stale_run_hours` (6 hours); then click **Retry unanswered** on the run.
+- Custom engines: the `SupportsBatches` interface no longer exists. If your engine implements it, remove `implements SupportsBatches` (PHP fails to load the class otherwise); the batch methods can go too.
+
+### Changed
+
+- **Retry skipped** on a run is now **Retry unanswered**: it asks failed answers again as well as skipped ones, for example answers lost with a flushed queue.
 - The Run now confirmation says when a run cannot start (for example the daily run limit is reached), instead of only after you click Start.
 - Cost estimates before the first answers use measured averages: Claude ~$0.08, Gemini ~$0.09 and Grok ~$0.30 per answer were estimated far too low. See the table in `docs/engines-and-costs.md`.
+
+### Fixed
+
+- Answer page: "Cited in the answer" now uses what the engine reports. Claude, Perplexity and Grok return every page they read as well as the pages they cite; only the cited ones were meant to be listed as cited. Before, a source counted as cited only when its domain appeared in the answer text, so most of Claude's cited sources ended up under "Also read".
+- Mention quotes were cut at the dot in a domain ("com (monday dev)" instead of "monday.com (monday dev)").
 
 ## v1.0.5 — 2026-09-27
 

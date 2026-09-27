@@ -6,7 +6,6 @@
   - [Example: an engine on HttpEngine](#example-an-engine-on-httpengine)
   - [Errors and pausing](#errors-and-pausing)
   - [Config, keys and prices for the new engine](#config-keys-and-prices-for-the-new-engine)
-  - [Batch support (economy mode)](#batch-support-economy-mode)
   - [Removing or replacing a built-in engine](#removing-or-replacing-a-built-in-engine)
 - [Adding a custom keyword source](#adding-a-custom-keyword-source)
 - [Events](#events)
@@ -226,7 +225,7 @@ To write an engine without `HttpEngine`, implement the contract directly. A sear
 
 ### Errors and pausing
 
-Throw `IsrarMinhas\FilamentAiVisibility\Engines\EngineRequestFailed` from `ask()`, `complete()` and batch methods. Its `reason` (an `IsrarMinhas\FilamentAiVisibility\Enums\PauseReason` or `null`) decides what happens:
+Throw `IsrarMinhas\FilamentAiVisibility\Engines\EngineRequestFailed` from `ask()` and `complete()`. Its `reason` (an `IsrarMinhas\FilamentAiVisibility\Enums\PauseReason` or `null`) decides what happens:
 
 | Reason | What happens to the engine | What happens to the answer |
 |---|---|---|
@@ -283,77 +282,6 @@ Add these to your published `config/ai-visibility.php`. None is strictly require
 ```
 
 The engine appears in Settings, the setup wizard, the brand's engine list, Health and `ai-visibility:engines`. For helper work in "Automatic" mode, engines not in `helper_engine_order` are tried after the listed ones; add `'acme'` to the list to change its place.
-
-### Batch support (economy mode)
-
-Implement `IsrarMinhas\FilamentAiVisibility\Engines\Contracts\SupportsBatches` to let scheduled runs use your provider's batch API when economy mode is on:
-
-| Method | Must |
-|---|---|
-| `submitBatch(string $apiKey, array $requests): string` | Send every `EngineRequest` (keyed by a custom ID such as `result-123`) and return the provider's batch ID. Throw `EngineRequestFailed` if the batch was not accepted. |
-| `batchStatus(string $apiKey, string $batchId): BatchStatus` | Return `new BatchStatus(BatchStatus::PENDING)`, `BatchStatus::DONE` (also for an expired batch that has partial results) or `BatchStatus::FAILED` with a message. |
-| `batchResults(string $apiKey, string $batchId): iterable` | Yield `customId => EngineResponse` for answers, and `customId => EngineRequestFailed` for items that failed. |
-
-Added to the `AcmeEngine` class above (keep its existing imports):
-
-```php
-use IsrarMinhas\FilamentAiVisibility\Engines\BatchStatus;
-use IsrarMinhas\FilamentAiVisibility\Engines\Contracts\SupportsBatches;
-
-class AcmeEngine extends HttpEngine implements SupportsBatches
-{
-    // ... everything from the example above ...
-
-    public function submitBatch(string $apiKey, array $requests): string
-    {
-        $items = [];
-
-        foreach ($requests as $customId => $request) {
-            $items[] = [
-                'custom_id' => (string) $customId,
-                'model' => $request->model,
-                'messages' => [['role' => 'user', 'content' => $request->prompt]],
-                'web_search' => ['enabled' => true],
-            ];
-        }
-
-        return (string) $this->send(fn () => $this->http($apiKey)->post('/batches', ['requests' => $items]))->json('id');
-    }
-
-    public function batchStatus(string $apiKey, string $batchId): BatchStatus
-    {
-        $batch = $this->sendBatchRequest(fn () => $this->http($apiKey)->get("/batches/{$batchId}"));
-
-        return match ($batch->json('status')) {
-            'completed', 'expired' => new BatchStatus(BatchStatus::DONE),
-            'failed', 'cancelled' => new BatchStatus(BatchStatus::FAILED, $batch->json('error.message')),
-            default => new BatchStatus(BatchStatus::PENDING),
-        };
-    }
-
-    public function batchResults(string $apiKey, string $batchId): iterable
-    {
-        $results = $this->sendBatchRequest(fn () => $this->http($apiKey)->get("/batches/{$batchId}/results"));
-
-        foreach ((array) $results->json('results', []) as $item) {
-            $id = (string) ($item['custom_id'] ?? '');
-
-            yield $id => isset($item['response'])
-                ? new EngineResponse(
-                    answer: trim((string) data_get($item, 'response.choices.0.message.content')),
-                    citations: EngineResponse::uniqueCitations(data_get($item, 'response.citations', [])),
-                    model: (string) data_get($item, 'response.model', ''),
-                    inputTokens: data_get($item, 'response.usage.prompt_tokens'),
-                    outputTokens: data_get($item, 'response.usage.completion_tokens'),
-                    searches: (int) data_get($item, 'response.usage.web_searches', 0),
-                )
-                : new EngineRequestFailed('Acme AI: ' . (data_get($item, 'error.message') ?? 'the batch request failed.'));
-        }
-    }
-}
-```
-
-`sendBatchRequest()` treats a 404 as "batch gone" rather than an engine problem. The package handles everything else: recording the batch before submitting, never sending the same answers twice, polling every 5 minutes, retrying in real time what the batch did not answer, and applying `pricing.batch_discount`.
 
 ### Removing or replacing a built-in engine
 
@@ -512,7 +440,7 @@ All events are in `IsrarMinhas\FilamentAiVisibility\Events` and are dispatched s
 | Event | Payload | Fired when |
 |---|---|---|
 | `RunStarted` | `Run $run` | A run was created and its jobs queued (Run now, schedule, `ai-visibility:run`). |
-| `ResultRecorded` | `Result $result` | An answer was stored successfully (real-time job, or economy batch collected by `poll-batches`). Not fired for failed or skipped answers. |
+| `ResultRecorded` | `Result $result` | An answer was stored successfully by the real-time job. Not fired for failed or skipped answers. |
 | `RunCompleted` | `Run $run` | A run closed, once, whatever its status (`completed`, `partial`, `failed`, `stopped_budget`, `stopped_paused`), including runs closed by the sweeper. The package itself queues discovery and alert checks on this event. |
 | `EnginePaused` | `string $engine`, `PauseReason $reason`, `?string $message`, `int\|string\|null $tenantId` | An engine paused. Once per pause episode, not per failed request. |
 | `EngineResumed` | `string $engine`, `int\|string\|null $tenantId` | A paused engine was resumed (automatically or by a person). |
@@ -590,7 +518,7 @@ These services are registered as singletons, so one binding replaces them everyw
 | `Runs\BudgetGuard` | Budget checks and pauses. |
 | `Reports\Metrics` | Report metrics. |
 
-All class names are under `IsrarMinhas\FilamentAiVisibility\`. Other services (such as `Runs\Economy`, `Runs\ResultRecorder`, `Competitors\Classifier`, `Reports\ReportSender`) are resolved from the container too, so `bind()` works for them.
+All class names are under `IsrarMinhas\FilamentAiVisibility\`. Other services (such as `Runs\ResultRecorder`, `Competitors\Classifier`, `Reports\ReportSender`) are resolved from the container too, so `bind()` works for them.
 
 Bind your subclass in `register()` of a service provider. App providers register after package providers, so your binding wins.
 
@@ -603,9 +531,9 @@ use IsrarMinhas\FilamentAiVisibility\Support\Pricing;
 
 class PricingWithFee extends Pricing
 {
-    public function cost(string $engine, ?string $model, ?int $inputTokens, ?int $outputTokens, int $searches = 0, bool $batch = false): float
+    public function cost(string $engine, ?string $model, ?int $inputTokens, ?int $outputTokens, int $searches = 0): float
     {
-        return parent::cost($engine, $model, $inputTokens, $outputTokens, $searches, $batch) + 0.001;
+        return parent::cost($engine, $model, $inputTokens, $outputTokens, $searches) + 0.001;
     }
 }
 ```

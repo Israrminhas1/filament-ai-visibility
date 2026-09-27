@@ -12,7 +12,6 @@ use IsrarMinhas\FilamentAiVisibility\Commands\SendReportsCommand;
 use IsrarMinhas\FilamentAiVisibility\Commands\EnginesCommand;
 use IsrarMinhas\FilamentAiVisibility\Commands\HealthCommand;
 use IsrarMinhas\FilamentAiVisibility\Commands\InstallCommand;
-use IsrarMinhas\FilamentAiVisibility\Commands\PollBatchesCommand;
 use IsrarMinhas\FilamentAiVisibility\Commands\PruneAnswersCommand;
 use IsrarMinhas\FilamentAiVisibility\Commands\ProbeCommand;
 use IsrarMinhas\FilamentAiVisibility\Commands\RedetectCommand;
@@ -76,9 +75,9 @@ class AiVisibilityServiceProvider extends PackageServiceProvider
                 'add_ai_visibility_analysis_columns',
                 'create_ai_visibility_connections_table',
                 'create_ai_visibility_automation_tables',
-                'create_ai_visibility_batches_table',
                 'add_ai_visibility_reliability_columns',
                 'add_ai_visibility_citation_cited_column',
+                'drop_ai_visibility_batches_table',
             ])
             ->hasCommands([
                 InstallCommand::class,
@@ -90,7 +89,6 @@ class AiVisibilityServiceProvider extends PackageServiceProvider
                 SyncKeywordsCommand::class,
                 AlertsCommand::class,
                 SendReportsCommand::class,
-                PollBatchesCommand::class,
                 SweepRunsCommand::class,
                 PruneAnswersCommand::class,
                 RedetectCommand::class,
@@ -223,12 +221,6 @@ class AiVisibilityServiceProvider extends PackageServiceProvider
                 ->everyFiveMinutes()
                 ->withoutOverlapping()
                 ->name('ai-visibility:probe');
-
-            // Economy mode: collect finished batches.
-            $schedule->command('ai-visibility:poll-batches')
-                ->everyFiveMinutes()
-                ->withoutOverlapping()
-                ->name('ai-visibility:poll-batches');
 
             // Close runs whose remaining answers were lost (e.g. a flushed queue).
             $schedule->command('ai-visibility:sweep-runs')

@@ -23,7 +23,7 @@ This README is an overview of the features. The developer documentation is in [`
 - [Configuration](docs/configuration.md): every config key and env var, the Settings page, per-brand overrides
 - [Plugin options](docs/plugin-options.md): every `AiVisibilityPlugin` method
 - [Permissions and tenancy](docs/permissions-and-tenancy.md): access control and multi-tenancy
-- [Engines and costs](docs/engines-and-costs.md): each engine, API keys, economy mode, pricing, estimates, budgets
+- [Engines and costs](docs/engines-and-costs.md): each engine, API keys, pricing, estimates, budgets
 - [Extending](docs/extending.md): custom engines and keyword sources, events, container bindings, AI instructions, views
 - [Troubleshooting](docs/troubleshooting.md): Health checks, paused engines, stuck runs, detection, emails, multi-server
 
@@ -119,12 +119,6 @@ The **Answers** list shows one result per answer (`#2 · cited`, `Mentioned`, `N
 - who was mentioned, ranked: you first, then competitors, then other names, each with the sentence around it and the analysis (sentiment, recommendation, descriptors)
 - the sources, split into those **cited in the answer** and those the engine **also read**, with your site and competitors' sites labelled
 - links to the prompt, the run, and the previous and next answer in the run
-
-### Economy mode
-
-Turn on **Settings → Engines & API keys → Economy mode** to send scheduled runs on OpenAI and Claude through their batch APIs. Tokens cost about half as much; answers arrive within 24 hours instead of minutes. Manual runs are always answered in real time, and other engines are unaffected.
-
-`ai-visibility:poll-batches` (every 5 minutes) collects finished batches. Nothing is lost if a batch goes wrong: a failed or expired batch, an answer the provider rejected, or a batch still unfinished after 26 hours is answered again in real time. A bad key or empty credit balance pauses the engine exactly as it does for real-time runs. The run page shows how many answers are still waiting.
 
 Before a run starts, it's refused (with the reason) if setup is unfinished, "Pause everything" is on, no engine is usable, there are no active prompts, the queue is `sync`, the daily run limit is reached, or the estimated cost exceeds the remaining budget.
 
@@ -243,7 +237,7 @@ Engines pause themselves instead of failing over and over:
 | Out of credits | Engine pauses and you're alerted immediately; re-tested every 6 hours and resumed automatically once credits are added |
 | Monthly budget reached | Engines (or the brand, for a brand budget) pause; resume next month or when the budget is raised |
 
-A paused engine is skipped instantly: its remaining answers are marked **skipped** with the reason, no requests are sent, and nothing is retried in a loop. Once it's fixed, **Retry skipped** on the run collects the missing answers.
+A paused engine is skipped instantly: its remaining answers are marked **skipped** with the reason, no requests are sent, and nothing is retried in a loop. Once it's fixed, **Retry unanswered** on the run collects the missing answers.
 
 Each pause sends **one** alert per incident (not one per failed request), in the panel, by email and to Slack, with the exact fix. These alerts are always on. The **Health** page shows every engine's state, the queue worker and the scheduler, and `php artisan ai-visibility:health` exits with an error code for your monitoring. See [Troubleshooting](docs/troubleshooting.md).
 
@@ -323,14 +317,13 @@ By default the screens are split into three navigation groups (if you upgrade fr
 | `ai-visibility:sync-keywords {--brand=ID} {--all}` | Pull keywords from connected sources (due ones run daily) |
 | `ai-visibility:alerts {--watch}` | Check alert rules (daily) or just the queue watchdog (every 10 minutes) |
 | `ai-visibility:send-reports` | Send scheduled reports that are due (hourly) |
-| `ai-visibility:poll-batches` | Store answers from finished economy-mode batches (every 5 minutes) |
 | `ai-visibility:sweep-runs` | Close runs whose remaining answers were lost, e.g. after a queue was flushed (hourly) |
 | `ai-visibility:redetect {--brand=ID}` | Check stored answers again with the current brand and competitor names. Runs by itself when a brand's name, aliases or domains, or its competitors, change |
 | `ai-visibility:prune {--dry-run}` | Remove the text of answers older than Settings → "Keep full answer text for"; metrics are kept (daily) |
 
 ## Costs
 
-Every call is recorded with its tokens, searches and cost ([details](docs/engines-and-costs.md)). Prices come from [AI Monitor](https://github.com/Israrminhas1/filament-aimonitor) when it's installed (and every call is also logged there), otherwise from `pricing` in `config/ai-visibility.php`. The bundled prices are estimates, so check them against each provider's pricing page. Economy-mode answers get `pricing.batch_discount` (50%) off their token cost; search fees are not discounted. SerpAPI searches are priced at `pricing.search_fee.google_ai_overview` / `google_ai_mode`, which depends on your SerpAPI plan.
+Every call is recorded with its tokens, searches and cost ([details](docs/engines-and-costs.md)). Prices come from [AI Monitor](https://github.com/Israrminhas1/filament-aimonitor) when it's installed (and every call is also logged there), otherwise from `pricing` in `config/ai-visibility.php`. The bundled prices are estimates, so check them against each provider's pricing page. SerpAPI searches are priced at `pricing.search_fee.google_ai_overview` / `google_ai_mode`, which depends on your SerpAPI plan.
 
 ## Testing
 

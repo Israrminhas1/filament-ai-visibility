@@ -48,7 +48,7 @@ Default `true` (everyone who passes `authorizeUsing()`). When it returns `false`
 | Health | Page visible. The **Pause**, **Test & resume** buttons and the link to the API keys are hidden, and the actions return 403. |
 | Paused-engines banner | Shown, without the "fix the key in Settings" link. |
 
-Everything else follows `authorizeUsing()` only: reports, brands (profile and detection), competitors, prompts, keywords, topics, discovered candidates (track, reject, classify again), runs (**Run now**, **Retry skipped**), answers and exports, and the alerts inbox.
+Everything else follows `authorizeUsing()` only: reports, brands (profile and detection), competitors, prompts, keywords, topics, discovered candidates (track, reject, classify again), runs (**Run now**, **Retry unanswered**), answers and exports, and the alerts inbox.
 
 `AiVisibilityPlugin::userCanManage()` returns `true` outside a panel (console commands, queued jobs), so background work is never blocked by these checks.
 
@@ -118,7 +118,7 @@ To turn tenancy off completely:
 
 | Scoped per tenant | Notes |
 |---|---|
-| Brands, runs, answers (results), usage and costs, candidates, keyword source connections, economy batches, alert rules, alerts inbox, report schedules | Own `tenant_id` column. |
+| Brands, runs, answers (results), usage and costs, candidates, keyword source connections, alert rules, alerts inbox, report schedules | Own `tenant_id` column. |
 | Competitors, prompts, keywords, topics | Scoped through their brand. |
 | Settings, including limits, budgets, alert channels, AI instructions, "Pause everything" and setup completion | One settings row per tenant. Each tenant runs the setup wizard once. |
 | API keys saved in the panel | One key per engine (credential) per tenant. |
@@ -153,7 +153,7 @@ Scheduled and manual commands act on all tenants:
 | `ai-visibility:run --brand=ID` | That brand, in its tenant. |
 | `ai-visibility:discover`, `ai-visibility:redetect`, `ai-visibility:alerts` | Every tenant's brands (or `--brand=ID`). |
 | `ai-visibility:sync-keywords` | Every tenant's due connections (or `--brand=ID`, `--all`). |
-| `ai-visibility:send-reports`, `ai-visibility:poll-batches`, `ai-visibility:sweep-runs` | Every tenant's rows. |
+| `ai-visibility:send-reports`, `ai-visibility:sweep-runs` | Every tenant's rows. |
 | `ai-visibility:probe` | Every tenant with a paused engine or a brand paused for budget. |
 | `ai-visibility:health {--tenant=}` | System checks once; engines for every tenant, or only `--tenant`. |
 | `ai-visibility:engines {--tenant=}` | Every tenant, or only `--tenant`. Works with `--test` and `--resume=engine`. |

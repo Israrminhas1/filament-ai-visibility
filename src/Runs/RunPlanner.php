@@ -14,7 +14,6 @@ use IsrarMinhas\FilamentAiVisibility\Enums\RunTrigger;
 use IsrarMinhas\FilamentAiVisibility\Events\RunStarted;
 use IsrarMinhas\FilamentAiVisibility\Exceptions\RunNotStarted;
 use IsrarMinhas\FilamentAiVisibility\Jobs\RunResultJob;
-use IsrarMinhas\FilamentAiVisibility\Jobs\SubmitBatchJob;
 use IsrarMinhas\FilamentAiVisibility\Models\Brand;
 use IsrarMinhas\FilamentAiVisibility\Models\Model;
 use IsrarMinhas\FilamentAiVisibility\Models\Result;
@@ -130,65 +129,59 @@ class RunPlanner
     }
 
     /**
-     * Queue the skipped results of a finished run again, e.g. after an engine is back.
+     * Queue the skipped and failed results of a finished run again, e.g. after an
+     * engine is back or answers were lost with a flushed queue.
      */
-    public function retrySkipped(Run $run): int
+    public function retryUnanswered(Run $run): int
     {
-        $skipped = $run->results()->where('status', ResultStatus::Skipped)->count();
+        $statuses = [ResultStatus::Skipped->value, ResultStatus::Failed->value];
+        $counts = $run->results()->whereIn('status', $statuses)->selectRaw('status, COUNT(*) as total')->groupBy('status')->pluck('total', 'status');
+        $skipped = (int) ($counts[ResultStatus::Skipped->value] ?? 0);
+        $failed = (int) ($counts[ResultStatus::Failed->value] ?? 0);
 
-        if ($skipped === 0) {
+        if ($skipped + $failed === 0) {
             return 0;
         }
 
-        DB::transaction(function () use ($run, $skipped) {
-            $run->results()->where('status', ResultStatus::Skipped)->update([
+        DB::transaction(function () use ($run, $statuses, $skipped, $failed) {
+            $run->results()->whereIn('status', $statuses)->update([
                 'status' => ResultStatus::Pending->value,
                 'skip_reason' => null,
+                'error' => null,
             ]);
 
             $run->forceFill([
                 'status' => RunStatus::Running,
                 'status_reason' => null,
                 'results_skipped' => $run->results_skipped - $skipped,
+                'results_failed' => $run->results_failed - $failed,
                 'finished_at' => null,
             ])->save();
         });
 
-        $this->dispatch($run, realtimeOnly: true);
+        $this->dispatch($run);
 
-        return $skipped;
+        return $skipped + $failed;
     }
 
     /**
-     * One job per result, or batches for engines in economy mode (scheduled runs only).
+     * One job per result, spread out at each engine's requests-per-minute
+     * (see RunResultJob::dispatchPaced()).
      */
-    protected function dispatch(Run $run, bool $realtimeOnly = false): void
+    protected function dispatch(Run $run): void
     {
-        $economy = app(Economy::class);
-        $batched = [];
-        $realtime = [];
+        $pending = [];
 
         $run->results()
             ->where('status', ResultStatus::Pending)
             ->select(['id', 'engine'])
             ->orderBy('id')
-            ->each(function (Result $result) use ($run, $economy, $realtimeOnly, &$batched, &$realtime) {
-                if (! $realtimeOnly && $economy->applies($run, $result->engine)) {
-                    $batched[$result->engine][] = $result->getKey();
-                } else {
-                    $realtime[$result->engine][] = $result->getKey();
-                }
+            ->each(function (Result $result) use (&$pending) {
+                $pending[$result->engine][] = $result->getKey();
             });
 
-        // Spread out at each engine's requests-per-minute (see RunResultJob::dispatchPaced()).
-        foreach ($realtime as $engine => $ids) {
+        foreach ($pending as $engine => $ids) {
             RunResultJob::dispatchPaced($ids, $engine, $run->tenant_id);
-        }
-
-        foreach ($batched as $engine => $ids) {
-            foreach (array_chunk($ids, (int) config('ai-visibility.economy.max_batch_size', 1000)) as $chunk) {
-                SubmitBatchJob::dispatch($run->getKey(), $engine, $chunk, $run->tenant_id);
-            }
         }
     }
 

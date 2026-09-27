@@ -10,7 +10,6 @@
   - [Google AI Overviews and Google AI Mode](#google-ai-overviews-and-google-ai-mode)
 - [API keys](#api-keys)
 - [Helper features](#helper-features)
-- [Economy (batch) mode](#economy-batch-mode)
 - [How costs are calculated](#how-costs-are-calculated)
 - [Estimates](#estimates)
 - [Budgets](#budgets)
@@ -31,15 +30,15 @@ Every request uses `http.timeout` (60 s). Only tracked answers use web search. H
 
 ## Engines
 
-| Key | Label | API | Web search | Location sent | Batch (economy) |
-|---|---|---|---|---|---|
-| `openai` | OpenAI (ChatGPT) | Responses API `POST /v1/responses` | `web_search` tool | Yes (`user_location`) | Yes |
-| `anthropic` | Anthropic (Claude) | Messages API `POST /v1/messages` | `web_search_20250305` server tool | Yes (`user_location`) | Yes |
-| `gemini` | Google Gemini | `generateContent` (v1beta) | Grounding with Google Search | No | No |
-| `grok` | xAI (Grok) | xAI Responses API `POST /v1/responses` | `web_search` tool | No | No |
-| `perplexity` | Perplexity | Agent API `POST /v1/agent` | `web_search` tool | Yes (`user_location`) | No |
-| `google_ai_overview` | Google AI Overviews | SerpAPI (`engine=google`) | Google search | Yes (`gl`) | No |
-| `google_ai_mode` | Google AI Mode | SerpAPI (`engine=google_ai_mode`) | Google AI Mode | Yes (`gl`) | No |
+| Key | Label | API | Web search | Location sent |
+|---|---|---|---|---|
+| `openai` | OpenAI (ChatGPT) | Responses API `POST /v1/responses` | `web_search` tool | Yes (`user_location`) |
+| `anthropic` | Anthropic (Claude) | Messages API `POST /v1/messages` | `web_search_20250305` server tool | Yes (`user_location`) |
+| `gemini` | Google Gemini | `generateContent` (v1beta) | Grounding with Google Search | No |
+| `grok` | xAI (Grok) | xAI Responses API `POST /v1/responses` | `web_search` tool | No |
+| `perplexity` | Perplexity | Agent API `POST /v1/agent` | `web_search` tool | Yes (`user_location`) |
+| `google_ai_overview` | Google AI Overviews | SerpAPI (`engine=google`) | Google search | Yes (`gl`) |
+| `google_ai_mode` | Google AI Mode | SerpAPI (`engine=google_ai_mode`) | Google AI Mode | Yes (`gl`) |
 
 Default models are in `config/ai-visibility.php` under `engines` and can be changed per tenant in **Settings → Engines & API keys**, or per brand. The model pickers only suggest models that support the engine's web search and return sources. You can type any other model. If the provider says the model does not exist or cannot search the web, the engine pauses with **Model unavailable** instead of failing every answer.
 
@@ -56,7 +55,7 @@ Default models are in `config/ai-visibility.php` under `engines` and can be chan
 
 - Default model: `claude-sonnet-5` (tracking and helper).
 - Suggestions: `claude-fable-5-1`, `claude-opus-5-5`, `claude-sonnet-5`, `claude-haiku-4-5`.
-- Uses the basic web search tool (`web_search_20250305`) with `max_uses` = `tracking.max_searches` (5). It works on every model and in batches, and returns every search result.
+- Uses the basic web search tool (`web_search_20250305`) with `max_uses` = `tracking.max_searches` (5). It works on every model and returns every search result.
 - A long search can stop with `pause_turn`. The conversation is then continued, up to three requests in total. Tokens and searches of all turns are added up. This is why an answer job can take a few minutes.
 - `max_tokens` = `tracking.max_output_tokens` (4096).
 - Sources: citations in the answer first, then every search result the model read.
@@ -129,27 +128,12 @@ Answer analysis, name extraction, competitor classification and suggestions, pro
 
 Helper calls are recorded with their own purpose (`analysis`, `classification`, `generation`) and count towards spend and budgets. They are blocked by "Pause everything" and by a used-up budget.
 
-## Economy (batch) mode
-
-Turn on **Settings → Engines & API keys → Economy mode for scheduled runs**.
-
-- Applies to **scheduled** runs on engines that support batches: OpenAI and Anthropic. Manual runs (**Run now**) and other engines are always real time.
-- OpenAI: the requests are uploaded as a JSONL file and sent to the Batch API for `/v1/responses` with a 24-hour window. Anthropic: the Message Batches API. Each answer in an Anthropic batch is a single request, so a search that would continue (`pause_turn`) keeps what it had.
-- Token cost gets `pricing.batch_discount` off (default 50%). Search fees are not discounted.
-- One `SubmitBatchJob` per engine and up to `economy.max_batch_size` (1000) answers.
-- `ai-visibility:poll-batches` (every 5 minutes) checks batches and stores finished answers. The run page shows how many answers are still waiting.
-- Nothing is lost:
-  - A failed, cancelled or expired batch, an answer the provider rejected, an empty answer, or a batch still unfinished after `economy.give_up_after_hours` (26) is asked again in real time.
-  - A bad key or empty credit balance pauses the engine, as it does in real time.
-  - If submitting fails before the provider accepted the batch, the answers are asked in real time.
-  - A batch is never submitted twice for the same answers.
-
 ## How costs are calculated
 
 Every call records its tokens, searches and cost in the usage table (and in AI Monitor if installed).
 
 ```
-cost = token cost × (1 − batch discount, for batch answers) + searches × search fee
+cost = token cost + searches × search fee
 ```
 
 **Token cost** = `input tokens × input price + output tokens × output price`, prices per 1M tokens:

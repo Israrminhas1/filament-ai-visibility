@@ -9,7 +9,7 @@ Developer documentation for installing, configuring, running and extending the p
 | [Configuration](configuration.md) | Every key in `config/ai-visibility.php`, every env var, what the Settings page stores, per-brand overrides. |
 | [Plugin options](plugin-options.md) | Every fluent method on `AiVisibilityPlugin`: navigation, screens, permissions, setup wizard, engines and keyword sources. |
 | [Permissions and tenancy](permissions-and-tenancy.md) | What `authorizeUsing()` and `canManageSettings()` control, policies, alert recipients, multi-tenancy, shared keys, commands per tenant. |
-| [Engines and costs](engines-and-costs.md) | Each engine's API, models, web search and sources; API keys; helper features; economy (batch) mode; how costs, estimates and budgets work. |
+| [Engines and costs](engines-and-costs.md) | Each engine's API, models, web search and sources; API keys; helper features; how costs, estimates and budgets work. |
 | [Extending](extending.md) | Custom AI engines, custom keyword sources, events, container bindings, AI instructions, views, translations. |
 | [Troubleshooting](troubleshooting.md) | Health checks, paused engines, runs that don't start or get stuck, duplicate jobs, detection, discovery, imports, emails, multi-server problems. |
 | [SPEC.md](SPEC.md) | The original design specification. |

@@ -4,16 +4,12 @@ namespace IsrarMinhas\FilamentAiVisibility\Engines\Drivers;
 
 use Illuminate\Http\Client\PendingRequest;
 use Illuminate\Http\Client\Response;
-use IsrarMinhas\FilamentAiVisibility\Engines\BatchStatus;
 use IsrarMinhas\FilamentAiVisibility\Engines\CompletionResponse;
 use IsrarMinhas\FilamentAiVisibility\Engines\CompletionRequest;
-use IsrarMinhas\FilamentAiVisibility\Engines\Contracts\SupportsBatches;
 use IsrarMinhas\FilamentAiVisibility\Engines\EngineRequest;
-use IsrarMinhas\FilamentAiVisibility\Engines\EngineRequestFailed;
 use IsrarMinhas\FilamentAiVisibility\Engines\EngineResponse;
-use IsrarMinhas\FilamentAiVisibility\Enums\PauseReason;
 
-class AnthropicEngine extends HttpEngine implements SupportsBatches
+class AnthropicEngine extends HttpEngine
 {
     public function key(): string
     {
@@ -94,84 +90,11 @@ class AnthropicEngine extends HttpEngine implements SupportsBatches
     }
 
     /**
-     * Economy mode: the Message Batches API. A batch answer is a single turn,
-     * so an answer that paused mid-search keeps what it had so far.
-     */
-    public function submitBatch(string $apiKey, array $requests): string
-    {
-        $items = [];
-
-        foreach ($requests as $customId => $request) {
-            $items[] = [
-                'custom_id' => (string) $customId,
-                'params' => $this->askParams($request, [['role' => 'user', 'content' => $request->prompt]]),
-            ];
-        }
-
-        return (string) $this->send(fn () => $this->http($apiKey)->post('/messages/batches', ['requests' => $items]))->json('id');
-    }
-
-    public function batchStatus(string $apiKey, string $batchId): BatchStatus
-    {
-        $batch = $this->sendBatchRequest(fn () => $this->http($apiKey)->get("/messages/batches/{$batchId}"));
-
-        return $batch->json('processing_status') === 'ended'
-            ? new BatchStatus(BatchStatus::DONE)
-            : new BatchStatus(BatchStatus::PENDING);
-    }
-
-    public function batchResults(string $apiKey, string $batchId): iterable
-    {
-        $content = $this->sendBatchRequest(fn () => $this->http($apiKey)->get("/messages/batches/{$batchId}/results"))->body();
-
-        foreach (preg_split('/\r?\n/', trim($content)) as $line) {
-            $item = json_decode($line, true);
-
-            if (! is_array($item) || ! isset($item['custom_id'])) {
-                continue;
-            }
-
-            $message = (array) data_get($item, 'result.message', []);
-
-            yield $item['custom_id'] => match (data_get($item, 'result.type')) {
-                'succeeded' => $this->answerFromBlocks(
-                    (array) ($message['content'] ?? []),
-                    (string) ($message['model'] ?? ''),
-                    (int) data_get($message, 'usage.input_tokens', 0),
-                    (int) data_get($message, 'usage.output_tokens', 0),
-                    (int) data_get($message, 'usage.server_tool_use.web_search_requests', 0),
-                ),
-                'errored' => new EngineRequestFailed(
-                    $this->label() . ': ' . (data_get($item, 'result.error.error.message') ?? 'The batch request failed.'),
-                    self::batchErrorReason((string) data_get($item, 'result.error.error.type')),
-                ),
-                // Expired or canceled: it never ran, so it is retried in real time.
-                default => new EngineRequestFailed(
-                    $this->label() . ': the batch request ' . data_get($item, 'result.type', 'failed') . '.',
-                    PauseReason::ProviderOutage,
-                ),
-            };
-        }
-    }
-
-    protected static function batchErrorReason(string $type): ?PauseReason
-    {
-        return match ($type) {
-            'authentication_error', 'permission_error' => PauseReason::InvalidKey,
-            'billing_error' => PauseReason::InsufficientCredits,
-            'rate_limit_error' => PauseReason::RateLimited,
-            'overloaded_error', 'api_error' => PauseReason::ProviderOutage,
-            'not_found_error' => PauseReason::ModelUnavailable,
-            default => null,
-        };
-    }
-
-    /**
      * @return array<string, mixed>
      */
     protected function webSearchTool(EngineRequest $request): array
     {
-        // The basic tool works on every model and in batches, and returns every
+        // The basic tool works on every model and returns every
         // search result directly. The newer versions filter results through
         // code execution, which some models reject and which hides sources.
         $tool = [

@@ -17,15 +17,15 @@ class ViewRun extends ViewRecord
     protected function getHeaderActions(): array
     {
         return [
-            Action::make('retrySkipped')
-                ->label('Retry skipped')
+            Action::make('retryUnanswered')
+                ->label('Retry unanswered')
                 ->icon('heroicon-o-arrow-path')
                 ->color('gray')
-                ->visible(fn (Run $record) => $record->isFinished() && $record->results()->where('status', ResultStatus::Skipped)->exists())
+                ->visible(fn (Run $record) => $record->isFinished() && $record->results()->whereIn('status', [ResultStatus::Skipped, ResultStatus::Failed])->exists())
                 ->requiresConfirmation()
-                ->modalDescription('Queue the skipped answers again, e.g. now that a paused engine is back. Paused engines are skipped again.')
+                ->modalDescription('Ask the skipped and failed prompts again in real time, e.g. now that a paused engine is back. Engines that are still paused are skipped again.')
                 ->action(function (Run $record) {
-                    $count = app(RunPlanner::class)->retrySkipped($record);
+                    $count = app(RunPlanner::class)->retryUnanswered($record);
 
                     Notification::make()->title("Retrying {$count} answers")->success()->send();
                 }),

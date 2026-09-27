@@ -312,7 +312,7 @@ class EngineManager
 
         // A pause that waits for a person (manual, budget, key, model) is never
         // replaced by one that ends on its own: late results from in-flight jobs
-        // or batches would otherwise let the probe resume it.
+        // would otherwise let the probe resume it.
         if ($this->waitsForPerson($state)) {
             return;
         }
@@ -337,7 +337,7 @@ class EngineManager
             },
 
             // One outage is one pause: further failures while paused for it (in-flight
-            // requests, late batch results) do not grow the back-off again.
+            // requests) do not grow the back-off again.
             PauseReason::ProviderOutage => $failures >= (int) $config['failure_threshold'] && ! $pausedFor($reason)
                 ? $this->pause($engine, $reason, $message, probeAt: now()->addMinutes($this->outagePauseMinutes($state)))
                 : null,

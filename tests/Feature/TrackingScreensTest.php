@@ -98,7 +98,7 @@ it('retries skipped answers from the run page', function () {
     Queue::fake();
 
     livewire(ViewRun::class, ['record' => $run->getRouteKey()])
-        ->callAction('retrySkipped')
+        ->callAction('retryUnanswered')
         ->assertNotified('Retrying 1 answers');
 
     Queue::assertPushed(RunResultJob::class, 1);

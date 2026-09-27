@@ -200,6 +200,7 @@ Upgrade notes:
 
 - The navigation is split into three groups by default ("AI Visibility", "AI Visibility · Tracking", "AI Visibility · Admin"). If you upgrade from a version with one group, add `->navigationGroups(false)` to keep one group.
 - The per-purpose queue env vars (`AI_VISIBILITY_QUEUE_TRACKING`, `_ANALYSIS`, `_CLASSIFICATION`) all fall back to `AI_VISIBILITY_QUEUE`, so an existing single-queue setup keeps working. See [Queues and scheduler](queues-and-scheduler.md).
+- v1.1 removed economy (batch) mode. The new migrations add a column to citations and drop the batches table. Answers still waiting in a batch are closed as failed within `tracking.stale_run_hours`; click **Retry unanswered** on the run to ask them in real time. A custom engine that implements `SupportsBatches` must drop that interface.
 
 ## Uninstalling
 

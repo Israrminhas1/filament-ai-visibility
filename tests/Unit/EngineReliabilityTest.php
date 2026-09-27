@@ -207,25 +207,14 @@ describe('failure classification', function () {
     ]);
 
     it('takes the wait from Google\'s retry details', function () {
-        $failed = EngineRequestFailed::fromStatus(429, (string) json_encode(['error' => [
+        $failed = EngineRequestFailed::fromResponse(new \Illuminate\Http\Client\Response(new \GuzzleHttp\Psr7\Response(429, [], (string) json_encode(['error' => [
             'status' => 'RESOURCE_EXHAUSTED',
             'message' => 'Quota exceeded',
             'details' => [['@type' => 'type.googleapis.com/google.rpc.RetryInfo', 'retryDelay' => '36s']],
-        ]]), 'Gemini: quota');
+        ]]))), 'Gemini: quota');
 
         expect($failed->reason)->toBe(PauseReason::RateLimited)
             ->and($failed->retryAfter)->toBe(36);
-    });
-
-    it('does not blame the model when a batch has expired', function () {
-        Http::fake(['api.openai.com/*' => Http::response(['error' => ['message' => 'No such File object: file-abc']], 404)]);
-
-        try {
-            app(EngineRegistry::class)->get('openai')->batchStatus('sk', 'batch_1');
-            $this->fail('Expected the poll to fail.');
-        } catch (EngineRequestFailed $e) {
-            expect($e->reason)->toBeNull();
-        }
     });
 });
 

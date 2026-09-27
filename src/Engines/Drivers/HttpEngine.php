@@ -94,25 +94,6 @@ abstract class HttpEngine implements Engine
     }
 
     /**
-     * Send a batch status or results request. A 404 there means the batch or its
-     * file is gone (expired, deleted), which fails that poll, not the engine.
-     *
-     * @param  callable(): Response  $send
-     */
-    protected function sendBatchRequest(callable $send): Response
-    {
-        try {
-            return $this->send($send);
-        } catch (EngineRequestFailed $e) {
-            if ($e->status === 404) {
-                throw new EngineRequestFailed($e->getMessage(), null, $e->retryAfter, $e->status);
-            }
-
-            throw $e;
-        }
-    }
-
-    /**
      * Send a tracked prompt with web search enabled.
      */
     abstract protected function sendAsk(PendingRequest $http, EngineRequest $request): Response;
