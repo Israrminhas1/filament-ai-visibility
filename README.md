@@ -12,12 +12,7 @@ Track how your brand shows up in answers from ChatGPT, Claude, Gemini, Perplexit
 
 <sub>Screenshots use fictional sample data.</sub>
 
-> **Status: beta (`v1.0.0-beta.1`).** Every feature is built and covered by 550+ tests on Filament 4 and 5.
->
-> - Checked against the real APIs: OpenAI and Claude (real-time answers), competitor discovery, and website fetching.
-> - Not yet run against the real APIs: Gemini, Grok, Perplexity, Google AI Overviews / AI Mode, and economy (batch) mode. These are covered only by tests with simulated responses, so treat them as beta.
->
-> Please [open an issue](https://github.com/Israrminhas1/filament-ai-visibility/issues) if something doesn't work.
+> **Status: beta (`v1.0.0-beta.1`).** Please [open an issue](https://github.com/Israrminhas1/filament-ai-visibility/issues) if something doesn't work.
 
 ## Documentation
 
